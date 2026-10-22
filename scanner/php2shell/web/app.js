@@ -563,3 +563,144 @@
         `/api/events?id=${encodeURIComponent(job.id)}&token=${encodeURIComponent(TOKEN)}`,
       );
       let result = null;
+      let chain = Promise.resolve();
+
+      es.onmessage = (e) => {
+        let ev;
+        try { ev = JSON.parse(e.data); } catch { return; }
+
+        if (ev.type === 'result') {
+          result = ev.result;
+          setConn('scanning', 'punching');
+          chain = chain
+            .then(() => perform(ev.result))
+            .then(() => showVerdict(ev.result));
+          return;
+        }
+
+        if (ev.type === 'done') {
+          es.close();
+          chain.then(() => resolve(result));
+          return;
+        }
+
+        handleProgress(ev);
+      };
+
+      es.onerror = () => {
+        if (es.readyState === EventSource.CLOSED) {
+          if (!result) {
+            logLine('event stream closed unexpectedly', 'hit');
+            setConn('error', 'error');
+          }
+          resolve(result);
+        }
+      };
+    });
+  }
+
+  const queue = [];
+  let busy = false;
+
+  async function enqueue(target) {
+    queue.push(target);
+    if (busy) return;
+    busy = true;
+    scanBtn.disabled = true;
+    while (queue.length) {
+      const next = queue.shift();
+      await runScan(next);
+      if (queue.length) await wait(900);
+    }
+    busy = false;
+    scanBtn.disabled = false;
+    input.focus();
+  }
+
+  /* ── wiring ────────────────────────────────────────────────────────── */
+
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const target = input.value.trim();
+    if (!target) { input.focus(); return; }
+    Sfx.ensure();
+    enqueue(target);
+  });
+
+  $('soundBtn').addEventListener('click', (e) => {
+    Sfx.enabled = !Sfx.enabled;
+    e.currentTarget.setAttribute('aria-pressed', String(Sfx.enabled));
+    e.currentTarget.textContent = Sfx.enabled ? 'sound on' : 'sound off';
+    if (Sfx.enabled) Sfx.ensure();
+  });
+
+  $('helpBtn').addEventListener('click', (e) => {
+    e.preventDefault();
+    $('help').hidden = false;
+  });
+  $('closeHelp').addEventListener('click', () => { $('help').hidden = true; });
+  $('help').addEventListener('click', (e) => {
+    if (e.target === $('help')) $('help').hidden = true;
+  });
+
+  $('closeVerdict').addEventListener('click', () => { hideVerdict(); });
+  $('againBtn').addEventListener('click', () => {
+    const target = cardUrl.textContent;
+    hideVerdict();
+    if (target && target !== 'no target') enqueue(target);
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      $('help').hidden = true;
+      hideVerdict();
+    }
+  });
+
+  window.addEventListener('resize', () => {
+    // A punch in flight keeps its measured geometry; nothing to do here.
+  });
+
+  // Debug handle: lets you replay a verdict without a live target, which is
+  // how the choreography is tuned. Harmless in normal use.
+  window.__php2shell = {
+    run: enqueue,
+    perform,
+    setPhase,
+    measure,
+    applyGeometry,
+    preview(verdict) {
+      return perform({
+        verdict: verdict || 'VULNERABLE',
+        confidence: 'HIGH',
+        reason: 'preview',
+        elapsed_seconds: 0.42,
+        bytes_sent: 1048576,
+      }).then(() => showVerdict({
+        verdict: verdict || 'VULNERABLE',
+        confidence: 'HIGH',
+        reason: 'Preview of the verdict panel.',
+        elapsed_seconds: 0.42,
+        bytes_sent: 1048576,
+      }));
+    },
+  };
+
+  // Prefill and auto-start when the CLI supplied targets.
+  (async () => {
+    try {
+      const res = await fetch(`/api/config?token=${encodeURIComponent(TOKEN)}`);
+      if (!res.ok) return;
+      const cfg = await res.json();
+      if (cfg.options && cfg.options.max_probe_mib) {
+        cardMeta.textContent = `probe cap ${cfg.options.max_probe_mib} MiB \u00b7 sapi ${cfg.options.sapi}`;
+      }
+      if (cfg.targets && cfg.targets.length) {
+        input.value = cfg.targets[0];
+        for (const t of cfg.targets) enqueue(t);
+      }
+    } catch {
+      /* The page still works without config. */
+    }
+  })();
+})();
