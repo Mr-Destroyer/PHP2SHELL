@@ -310,3 +310,159 @@ button { cursor: pointer; }
 
 /* warm-up while the scanner is working */
 [data-phase="scan"] #armFront  { transform: rotate(16deg); }
+[data-phase="scan"] #foreFront { transform: rotate(-42deg); }
+[data-phase="scan"] #armBack   { transform: rotate(-14deg); }
+[data-phase="scan"] #foreBack  { transform: rotate(30deg); }
+[data-phase="scan"] #legFront  { transform: rotate(-6deg); }
+[data-phase="scan"] #legBack   { transform: rotate(6deg); }
+[data-phase="scan"] #heroPose  { transform: translateY(3px) scaleY(.99); }
+
+/* wind-up */
+[data-phase="windup"] #heroPose { transform: translateY(9px) scaleY(.975); --dur: .5s; }
+[data-phase="windup"] #upperBody { transform: rotate(-10deg); --dur: .5s; }
+[data-phase="windup"] #head      { transform: rotate(-7deg); }
+[data-phase="windup"] #armFront  { transform: rotate(150deg); --dur: .5s; --ease: cubic-bezier(.3, .9, .3, 1); }
+[data-phase="windup"] #foreFront { transform: rotate(-40deg); }
+[data-phase="windup"] #armBack   { transform: rotate(40deg); }
+[data-phase="windup"] #foreBack  { transform: rotate(-30deg); }
+[data-phase="windup"] #legBack   { transform: rotate(-13deg); }
+[data-phase="windup"] #legFront  { transform: rotate(15deg); }
+[data-phase="windup"] #capeGrp   { transform: rotate(-8deg) scaleY(1.02); }
+
+/* dash */
+[data-phase="dash"] .hero-wrap {
+  transform: translateX(var(--dash-x));
+  transition: transform .24s cubic-bezier(.55, -.05, .9, .35);
+}
+[data-phase="dash"] #heroPose  { transform: translateY(2px) scaleY(1.01) rotate(-4deg); --dur: .2s; }
+[data-phase="dash"] #upperBody { transform: rotate(17deg); --dur: .2s; }
+[data-phase="dash"] #head      { transform: rotate(-10deg); }
+[data-phase="dash"] #armFront  { transform: rotate(40deg); --dur: .2s; }
+[data-phase="dash"] #foreFront { transform: rotate(-30deg); }
+[data-phase="dash"] #armBack   { transform: rotate(-70deg); }
+[data-phase="dash"] #foreBack  { transform: rotate(-20deg); }
+[data-phase="dash"] #legBack   { transform: rotate(-40deg); }
+[data-phase="dash"] #legFront  { transform: rotate(46deg); }
+[data-phase="dash"] #capeGrp   { transform: rotate(26deg) scaleY(1.1); }
+
+/* impact */
+[data-phase="impact"] .hero-wrap { transform: translateX(var(--dash-x)); transition: none; }
+[data-phase="impact"] #heroPose  { transform: translateY(4px) scaleY(.99) rotate(3deg); --dur: .09s; }
+[data-phase="impact"] #upperBody { transform: rotate(11deg); --dur: .09s; }
+[data-phase="impact"] #head      { transform: rotate(6deg); --dur: .09s; }
+[data-phase="impact"] #armFront  { transform: rotate(-92deg); --dur: .075s; --ease: cubic-bezier(.05, .95, .2, 1); }
+[data-phase="impact"] #foreFront { transform: rotate(0deg); --dur: .075s; --ease: cubic-bezier(.05, .95, .2, 1); }
+[data-phase="impact"] #armBack   { transform: rotate(-46deg); --dur: .1s; }
+[data-phase="impact"] #foreBack  { transform: rotate(-10deg); }
+[data-phase="impact"] #legBack   { transform: rotate(-30deg); --dur: .1s; }
+[data-phase="impact"] #legFront  { transform: rotate(34deg); --dur: .1s; }
+[data-phase="impact"] #capeGrp   { transform: rotate(42deg) scaleY(1.14); --dur: .1s; }
+
+/* "not punchable" — the fist stops short and he straightens up */
+[data-phase="miss"] .hero-wrap { transform: translateX(var(--dash-x)); transition: transform .5s ease-out; }
+[data-phase="miss"] #armFront  { transform: rotate(-84deg); --dur: .1s; }
+[data-phase="miss"] #foreFront { transform: rotate(6deg); --dur: .1s; }
+[data-phase="miss"] #upperBody { transform: rotate(4deg); }
+[data-phase="miss"] #head      { transform: rotate(-14deg); }
+[data-phase="miss"] #armBack   { transform: rotate(-30deg); }
+[data-phase="miss"] #legBack   { transform: rotate(-18deg); }
+[data-phase="miss"] #legFront  { transform: rotate(22deg); }
+
+/* no reach — inconclusive */
+[data-phase="noreach"] #armFront  { transform: rotate(70deg); --dur: .5s; }
+[data-phase="noreach"] #foreFront { transform: rotate(-70deg); }
+[data-phase="noreach"] #upperBody { transform: rotate(-4deg); }
+[data-phase="noreach"] #head      { transform: rotate(-16deg); }
+
+/* afterimages during the dash */
+.afterimages { position: absolute; inset: 0; pointer-events: none; }
+.afterimages svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  filter: saturate(.4) brightness(1.3) blur(1px);
+}
+.afterimages.on svg { animation: ghost .34s ease-out forwards; }
+.afterimages.on svg:nth-child(1) { animation-delay: 0ms; }
+.afterimages.on svg:nth-child(2) { animation-delay: 34ms; }
+.afterimages.on svg:nth-child(3) { animation-delay: 68ms; }
+@keyframes ghost {
+  0% { opacity: .34; }
+  100% { opacity: 0; }
+}
+
+/* ── target card ──────────────────────────────────────────────────────── */
+
+.target-wrap {
+  position: absolute;
+  left: 60%;
+  top: 42%;
+  width: min(430px, 34vw);
+  transform: translate(-50%, -50%);
+  z-index: 10;
+  transition: opacity .4s, transform .4s;
+}
+/* the verdict panel carries the result; the card steps back */
+#app[data-panel="open"] .target-wrap {
+  opacity: .45;
+  transform: translate(-50%, -50%) scale(.97);
+}
+
+.target-card {
+  position: relative;
+  padding: 18px 20px 40px;
+  border: 2px solid rgba(255, 255, 255, .22);
+  border-radius: 4px;
+  background:
+    linear-gradient(180deg, rgba(24, 24, 34, .96), rgba(13, 13, 20, .98));
+  box-shadow:
+    8px 8px 0 rgba(0, 0, 0, .55),
+    0 0 60px rgba(0, 0, 0, .6);
+  overflow: hidden;
+  transition: border-color .35s, box-shadow .35s, opacity .25s;
+  animation: card-in .6s cubic-bezier(.2, .9, .3, 1.1) both;
+}
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(14px) rotate(-1.5deg); }
+  to   { opacity: 1; transform: translateY(0) rotate(0); }
+}
+
+.target-card[data-state="scanning"] {
+  border-color: rgba(255, 210, 63, .5);
+  box-shadow: 8px 8px 0 rgba(0, 0, 0, .55), 0 0 46px rgba(255, 210, 63, .12);
+}
+.target-card[data-state="vulnerable"] {
+  border-color: var(--red);
+  box-shadow: 8px 8px 0 rgba(0, 0, 0, .55), 0 0 70px rgba(255, 45, 63, .3);
+}
+.target-card[data-state="safe"] {
+  border-color: var(--cyan);
+  box-shadow: 8px 8px 0 rgba(0, 0, 0, .55), 0 0 50px rgba(56, 225, 208, .16);
+}
+.target-card[data-state="shattered"] { opacity: 0; }
+.target-card.wobble { animation: wobble .55s cubic-bezier(.36, .07, .19, .97); }
+@keyframes wobble {
+  15% { transform: translateX(-7px) rotate(-.7deg); }
+  30% { transform: translateX(6px) rotate(.6deg); }
+  48% { transform: translateX(-4px) rotate(-.4deg); }
+  66% { transform: translateX(3px) rotate(.25deg); }
+  82% { transform: translateX(-2px); }
+  100% { transform: translateX(0); }
+}
+
+/* scanning sweep */
+.card-scan {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  background: linear-gradient(180deg,
+      transparent 0%,
+      rgba(255, 210, 63, .03) 40%,
+      rgba(255, 210, 63, .16) 49%,
+      rgba(255, 210, 63, .5) 50%,
+      rgba(255, 210, 63, .16) 51%,
+      transparent 62%);
+  background-size: 100% 220%;
