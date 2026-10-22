@@ -82,3 +82,45 @@ $ ./scanner/scan -u https://example.com
 Most scanners shipped after disclosure read `X-Powered-By`. That is wrong in both
 directions:
 
+- **False positives.** Debian, Ubuntu and RHEL backport security fixes without
+  bumping the upstream version, so `PHP/8.2.29` may already be patched.
+- **False negatives.** `expose_php = Off` is common hardening. No header, no
+  detection — even on a fully vulnerable host.
+
+So the scanner sends what the vulnerability actually is: a multipart body
+engineered to exhaust `memory_limit` while the request is being parsed, and then
+reads how the target fails. Version data is only ever used as a separately
+labelled fallback. Details in
+[`docs/detection-methodology.md`](docs/detection-methodology.md).
+
+<details>
+<summary><b>Why a crash is the signal (and why that is not the same as "exploitable")</b></summary>
+
+The bug lives in the early-session window that opens during multipart parsing.
+Exhausting memory there is the precondition for corruption — it is the same code
+path the exploit chain walks. A reproduced OOM therefore proves the path is
+reachable on that build.
+
+It does **not** prove a working exploit exists for that build. Heap layout and
+symbol offsets differ per image, which is exactly what stage 3 of the chain runs
+into. Treat `VULNERABLE` as "the precondition holds", not as "you are owned".
+</details>
+
+<details>
+<summary><b>What the scanner deliberately does not do</b></summary>
+
+- No fuzzing of payload classes — it walks one path, the one the CVE describes.
+- No version-only claims presented as findings.
+- No automatic exploitation. The scanner never sends a forging body.
+- No telemetry, no callbacks, no cloud lookups. It runs offline apart from the
+  target itself.
+</details>
+
+---
+
+## Verified results
+
+Everything below was measured on `php:8.4.26-apache`, Apache 2.4.69 prefork,
+`mod_php`, `memory_limit=8M`, single worker. Full log in
+[`exploit-kit/FINDINGS.md`](exploit-kit/FINDINGS.md).
+
