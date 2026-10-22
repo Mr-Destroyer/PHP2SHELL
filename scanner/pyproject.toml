@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "php2shell-scanner"
+version = "1.1.0"
+description = "Behavioural scanner for php2shell (CVE-2026-109618 / CVE-2026-109619)"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "ZIM" }]
+keywords = ["security", "php", "cve", "scanner", "php2shell"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Topic :: Security",
+]
+dependencies = []
+
+[project.scripts]
+php2shell-scan = "php2shell.cli:main"
+
+[tool.setuptools]
+packages = ["php2shell"]
+
+[tool.setuptools.package-data]
+php2shell = ["web/*"]
