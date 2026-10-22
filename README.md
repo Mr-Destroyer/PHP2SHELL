@@ -40,3 +40,45 @@ Both are pure standard-library Python. Nothing to `pip install`, nothing to comp
 ## Quickstart
 
 ```bash
+git clone https://github.com/Mr-Destroyer/PHP2SHELL.git
+cd PHP2SHELL
+
+# 1. Is a target exposed?
+./scanner/scan -u https://target.example
+
+# 2. Batch it, with JSON output for the report
+./scanner/scan -l targets.txt -t 10 -o results.json
+
+# 3. Against a host you own: how far does the chain go?
+./exploit-kit/exploit -u http://127.0.0.1:8080 --diagnose
+```
+
+`./scanner/scan --ui` starts a local web console on a free port — the same engine,
+with per-probe detail and a live result table.
+
+### Scanner verdicts
+
+```
+$ ./scanner/scan -u https://example.com
+
+  VULNERABLE  https://example.com
+  confidence : HIGH
+  version    : PHP 8.4.26 (unpatched, fixed in 8.4.27)
+  signal     : in-band PHP fatal (memory exhausted in Unknown)
+  sent       : 1,048,617 bytes
+```
+
+| Verdict | Meaning |
+|---|---|
+| `VULNERABLE` | A probe reproduced the parser-path OOM. Confidence is `HIGH` when the signal is in-band. |
+| `LIKELY VULNERABLE` | No behavioural signal, but the version string is in the affected range. Labelled as a fallback, never merged with the above. |
+| `NOT VULNERABLE` | Baseline held and no probe produced a crash signal. |
+| `INCONCLUSIVE` | The control request failed, so no differential claim can be made. |
+
+---
+
+## Why behavioural detection
+
+Most scanners shipped after disclosure read `X-Powered-By`. That is wrong in both
+directions:
+
