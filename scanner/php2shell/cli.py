@@ -95,3 +95,100 @@ def print_result(result: ScanResult, verbose: bool = False) -> None:
     print(colorize("  reason:", C.BOLD))
     for line in _wrap(result.reason, 72):
         print(f"    {line}")
+
+    if verbose and result.probes:
+        print()
+        print(colorize("  probes:", C.BOLD))
+        for p in result.probes:
+            status = p.response.status if p.response.status is not None else "---"
+            sig = f" -> {p.signal.value}" if p.signal else ""
+            err = f" ({p.response.error})" if p.response.error else ""
+            print(f"    [{p.index}] {p.size_mib:>2} MiB / {p.parts:>4} parts  "
+                  f"HTTP {status}  {len(p.response.body):>6} bytes{sig}{err}")
+            if p.detail:
+                for line in _wrap(p.detail, 66):
+                    print(f"        {colorize(line, C.GREY)}")
+
+    if result.error:
+        print()
+        print(colorize(f"  error: {result.error}", C.RED))
+
+
+def _wrap(text: str, width: int) -> list[str]:
+    words = text.split()
+    lines: list[str] = []
+    current = ""
+    for word in words:
+        if not current:
+            current = word
+        elif len(current) + 1 + len(word) <= width:
+            current += " " + word
+        else:
+            lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    return lines or [""]
+
+
+def print_summary(results: list[ScanResult]) -> None:
+    counts: dict[str, int] = {}
+    for r in results:
+        counts[r.verdict.value] = counts.get(r.verdict.value, 0) + 1
+
+    print()
+    print(colorize("═" * 78, C.GREY))
+    print(colorize("  SUMMARY", C.BOLD))
+    print(colorize("═" * 78, C.GREY))
+
+    order = [
+        (Verdict.VULNERABLE, C.RED),
+        (Verdict.LIKELY_VULNERABLE, C.YELLOW),
+        (Verdict.FIXED, C.GREEN),
+        (Verdict.NOT_VULNERABLE, C.CYAN),
+        (Verdict.INCONCLUSIVE, C.MAGENTA),
+        (Verdict.ERROR, C.GREY),
+    ]
+    for verdict, color in order:
+        count = counts.get(verdict.value, 0)
+        if count:
+            print(f"  {colorize(f'{count:>4}', color)}  {verdict.value}")
+
+    vulnerable = [r for r in results if r.is_vulnerable]
+    if vulnerable:
+        print()
+        print(colorize("  Vulnerable targets:", C.RED))
+        for r in vulnerable:
+            conf = r.confidence.value
+            print(f"    - {r.target}  ({conf} confidence)")
+
+    no_signal = [r for r in results
+                 if r.verdict is Verdict.NOT_VULNERABLE
+                 and r.confidence is Confidence.NONE]
+    if no_signal:
+        print()
+        print(colorize(
+            "  Note: 'NO SIGNAL' is not proof of safety. A WAF, proxy limit,\n"
+            "  or hardened configuration can suppress the crash signal. Verify\n"
+            "  the installed PHP version directly where you can.", C.GREY))
+    print()
+
+
+def load_targets(args: argparse.Namespace) -> list[str]:
+    targets: list[str] = []
+    if args.url:
+        targets.extend(args.url)
+    if args.list:
+        try:
+            with open(args.list, "r", encoding="utf-8") as handle:
+                for line in handle:
+                    line = line.strip()
+                    if line and not line.startswith("#"):
+                        targets.append(line)
+        except OSError as exc:
+            print(colorize(f"error: cannot read {args.list}: {exc}", C.RED),
+                  file=sys.stderr)
+            sys.exit(2)
+
+    # Deduplicate while preserving order.
+    seen: set[str] = set()
