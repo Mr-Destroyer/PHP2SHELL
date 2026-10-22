@@ -1,0 +1,44 @@
+# Byte-compiled / optimised / cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# Test / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Scanner output — never commit a target list or its results
+results.json
+*-results.json
+targets.txt
+scan-output/
+ui.log
+
+# Captured traffic from the lab
+*.pcap
+*.pcapng
+raw/
+captures/
+
+# Editor / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
