@@ -88,3 +88,93 @@ class TestTruePositives(unittest.TestCase):
         self.control = resp(200, b"hello from the app")
 
     def test_plain_text_fatal(self):
+        signal, detail = detect_signal(self.control, resp(200, PLAIN_FATAL))
+        self.assertIs(signal, Signal.IN_BAND_FATAL)
+        self.assertIn("Unknown on line 0", detail)
+
+    def test_html_fatal(self):
+        # The critical regression: html_errors=On is the default.
+        signal, _ = detect_signal(self.control, resp(200, HTML_FATAL))
+        self.assertIs(signal, Signal.IN_BAND_FATAL)
+
+    def test_os_oom_variant(self):
+        signal, _ = detect_signal(self.control, resp(200, OS_OOM))
+        self.assertIs(signal, Signal.IN_BAND_FATAL)
+
+    def test_differential_empty_500(self):
+        signal, _ = detect_signal(self.control, resp(500, b""))
+        self.assertIs(signal, Signal.EMPTY_500)
+
+    def test_upstream_dead_502(self):
+        signal, _ = detect_signal(self.control, resp(502, b""), sapi="fpm")
+        self.assertIs(signal, Signal.UPSTREAM_DEAD)
+
+    def test_upstream_dead_503(self):
+        signal, _ = detect_signal(self.control, resp(503, b""), sapi="fpm")
+        self.assertIs(signal, Signal.UPSTREAM_DEAD)
+
+    def test_empty_200_fpm(self):
+        signal, _ = detect_signal(self.control, resp(200, b""), sapi="fpm")
+        self.assertIs(signal, Signal.EMPTY_200)
+
+
+class TestFalsePositives(unittest.TestCase):
+    """Cases that MUST NOT be reported as vulnerable."""
+
+    def setUp(self):
+        self.control = resp(200, b"hello from the app")
+
+    def test_app_level_oom_is_not_a_signal(self):
+        # Names a real file/line -> ordinary application error.
+        signal, detail = detect_signal(self.control, resp(200, APP_OOM))
+        self.assertIsNone(signal)
+        self.assertIn("application code", detail)
+
+    def test_empty_500_without_control_output(self):
+        # If the control produced nothing, an empty 500 is meaningless.
+        control = resp(200, b"")
+        signal, _ = detect_signal(control, resp(500, b""))
+        self.assertIsNone(signal)
+
+    def test_500_with_body_is_not_a_signal(self):
+        # A 500 that renders an error page is an app error, not a crash.
+        signal, _ = detect_signal(self.control, resp(500, b"<h1>Server Error</h1>"))
+        self.assertIsNone(signal)
+
+    def test_404_is_not_a_signal(self):
+        signal, _ = detect_signal(self.control, resp(404, b"not found"))
+        self.assertIsNone(signal)
+
+    def test_403_is_not_a_signal(self):
+        signal, _ = detect_signal(self.control, resp(403, b"forbidden"))
+        self.assertIsNone(signal)
+
+    def test_413_is_not_a_signal(self):
+        signal, _ = detect_signal(self.control, resp(413, b"too large"))
+        self.assertIsNone(signal)
+
+    def test_502_when_control_also_failed(self):
+        # Backend was already down; not evidence of anything.
+        control = resp(502, b"")
+        signal, _ = detect_signal(control, resp(502, b""), sapi="fpm")
+        self.assertIsNone(signal)
+
+    def test_502_in_mod_php_mode(self):
+        # mod_php does not produce frontend 502s for this bug.
+        signal, _ = detect_signal(self.control, resp(502, b""), sapi="mod_php")
+        self.assertIsNone(signal)
+
+    def test_normal_200_with_body(self):
+        signal, _ = detect_signal(self.control, resp(200, b"normal page"))
+        self.assertIsNone(signal)
+
+    def test_oom_word_without_location(self):
+        # Mentions memory but not an initialization-time location.
+        body = b"Warning: memory exhausted while rendering template"
+        signal, _ = detect_signal(self.control, resp(200, body))
+        self.assertIsNone(signal)
+
+
+class TestRejectedStatuses(unittest.TestCase):
+    def test_rejected_set(self):
+        for status in (400, 403, 411, 413, 414, 417, 422, 429, 431):
