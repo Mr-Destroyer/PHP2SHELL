@@ -123,3 +123,65 @@ def parse_version(raw: str, allow_bare: bool = False) -> Optional[VersionInfo]:
 
     major, minor, patch = (int(g) for g in match.groups())
     branch = (major, minor)
+
+    if (major, minor, patch) < EARLIEST_AFFECTED:
+        return VersionInfo(raw, major, minor, patch, PatchStatus.TOO_OLD)
+
+    if branch in EOL_BRANCHES:
+        return VersionInfo(raw, major, minor, patch, PatchStatus.EOL)
+
+    fixed_patch = FIXED_VERSIONS.get(branch)
+    if fixed_patch is None:
+        # A branch newer than anything in the advisory (e.g. 8.6.x).
+        # We cannot say it is vulnerable, and we cannot say it is fixed.
+        return VersionInfo(raw, major, minor, patch, PatchStatus.UNKNOWN_BRANCH)
+
+    fixed_in = f"{major}.{minor}.{fixed_patch}"
+    status = (PatchStatus.FIXED if patch >= fixed_patch
+              else PatchStatus.VULNERABLE)
+    return VersionInfo(raw, major, minor, patch, status, fixed_in)
+
+
+def extract_from_headers(headers: dict[str, str]) -> Optional[VersionInfo]:
+    """
+    Pull a PHP version out of response headers.
+
+    X-Powered-By is the usual source, but some setups leak it elsewhere, so we
+    check a few candidates. Header lookup is case-insensitive.
+    """
+    lowered = {k.lower(): v for k, v in headers.items()}
+
+    for name in ("x-powered-by", "server", "x-php-version", "x-backend-server"):
+        value = lowered.get(name)
+        if not value:
+            continue
+        info = parse_version(value)
+        if info is not None:
+            return info
+
+    return None
+
+
+def extract_from_body(body: bytes, limit: int = 65536) -> Optional[VersionInfo]:
+    """
+    Look for a PHP version in the response body.
+
+    Useful when expose_php is off but the app leaks a version in a footer,
+    a generator meta tag, or a debug block. We only scan the first `limit`
+    bytes to keep this cheap.
+    """
+    if not body:
+        return None
+    try:
+        text = body[:limit].decode("utf-8", errors="replace")
+    except Exception:
+        return None
+
+    # Prefer an explicit "PHP/x.y.z" over a bare number, to avoid matching
+    # unrelated version strings (jQuery 3.6.0, Bootstrap 5.3.0, ...).
+    for match in re.finditer(r"PHP[/ ](\d+)\.(\d+)\.(\d+)", text, re.IGNORECASE):
+        info = parse_version(match.group(0))
+        if info is not None:
+            return info
+
+    return None
