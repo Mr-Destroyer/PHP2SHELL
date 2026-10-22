@@ -246,3 +246,128 @@ class Scanner:
                 f"{result.error} -- cannot establish a baseline, so no "
                 f"differential signal is meaningful"
             )
+            result.elapsed = time.monotonic() - started
+            self._emit("result", result=result.to_dict())
+            return result
+
+        # Record whatever version the control response advertised.
+        version = extract_from_headers(control.headers)
+        if version is None:
+            version = extract_from_body(control.body)
+        result.version = version
+
+        # ---- 1b. Discover post_max_size ---------------------------------
+        # A probe larger than post_max_size is discarded by PHP before the
+        # multipart parser runs, so it can never produce a signal. Sending one
+        # is not merely wasteful, it is a guaranteed false negative. Ask the
+        # target for its limit first, then never exceed it.
+        post_max = self._discover_post_max_size(url, result)
+        if post_max is not None:
+            result.post_max_size = post_max
+            self._log(f"post_max_size = {post_max:,} bytes")
+
+        # ---- 2. Progressive probes -------------------------------------
+        rejected_reason: Optional[str] = None
+
+        for index, (size_mib, parts) in enumerate(self._ladder(), start=1):
+            # Skip rungs that PHP would discard unparsed.
+            if post_max is not None and (size_mib << 20) >= post_max:
+                self._log(
+                    f"probe {index} skipped: {size_mib} MiB exceeds "
+                    f"post_max_size ({post_max:,} bytes)"
+                )
+                continue
+
+            self._log(f"probe {index}: {size_mib} MiB, {parts} parts")
+            self._emit(
+                "probe_start",
+                index=index,
+                size_mib=size_mib,
+                parts=parts,
+                total=len(self._ladder()),
+            )
+
+            try:
+                body = build_probe_body(size_mib, parts)
+            except ValueError as exc:
+                self._log(f"probe {index} skipped: {exc}")
+                continue
+
+            response = self.transport.request(
+                url,
+                method="POST",
+                body=body,
+                headers=self._multipart_headers(PROBE_BOUNDARY),
+            )
+            result.bytes_sent += len(body)
+
+            probe_result = ProbeResult(
+                index=index, size_mib=size_mib, parts=parts, response=response
+            )
+            result.probes.append(probe_result)
+
+            # A transport error mid-probe is itself informative: the worker
+            # may have died before we finished uploading. But we cannot
+            # distinguish that from a network fault, so we do not treat it
+            # as a signal on its own.
+            if response.error:
+                probe_result.detail = f"transport error: {response.error}"
+                self._log(f"probe {index}: {probe_result.detail}")
+                self._emit(
+                    "probe",
+                    index=index,
+                    size_mib=size_mib,
+                    status=response.status,
+                    body_bytes=len(response.body),
+                    error=response.error,
+                    signal=None,
+                    detail=probe_result.detail,
+                    bytes_total=result.bytes_sent,
+                )
+                continue
+
+            # Rejected before PHP parsed the body -> stop escalating.
+            if is_rejected(response):
+                rejected_reason = (
+                    f"probe {index} was rejected with HTTP {response.status} "
+                    f"before PHP parsed the body (WAF, proxy limit, or "
+                    f"web-server rule)"
+                )
+                probe_result.detail = rejected_reason
+                self._log(f"probe {index}: {rejected_reason}")
+                self._emit(
+                    "probe",
+                    index=index,
+                    size_mib=size_mib,
+                    status=response.status,
+                    body_bytes=len(response.body),
+                    error=None,
+                    signal=None,
+                    detail=rejected_reason,
+                    bytes_total=result.bytes_sent,
+                )
+                break
+
+            # Update version if this response advertised one.
+            probe_version = extract_from_headers(response.headers)
+            if probe_version is not None:
+                result.version = probe_version
+                version = probe_version
+
+            # ---- crash signal? ----
+            signal, detail = detect_signal(control, response, self.sapi)
+            if signal is not None:
+                probe_result.signal = signal
+                probe_result.detail = detail
+                result.signal = signal
+                result.verdict = Verdict.VULNERABLE
+                result.confidence = Confidence.HIGH
+                result.sapi = self._infer_sapi(signal)
+                result.reason = (
+                    f"probe {index} ({size_mib} MiB, {parts} parts) produced a "
+                    f"crash signal: {detail}"
+                )
+                result.elapsed = time.monotonic() - started
+                self._log(f"probe {index}: VULNERABLE -- {detail}")
+                self._emit(
+                    "probe",
