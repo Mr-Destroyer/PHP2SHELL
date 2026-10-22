@@ -45,3 +45,27 @@ versions are per-tool — the scanner and the exploit kit do not version in lock
   worker rotation. Each probe now opens its own connection.
 
 ## scanner 1.0.0 — 2026-10-19
+
+### Added
+
+- Behavioural detection: control request, then nested-array and empty-filename
+  multipart probes that exhaust `memory_limit` during parsing.
+- Version classification for both CVE ranges, used only as a labelled fallback.
+- Batch mode (`-l`), thread pool, per-request and connect timeouts, custom
+  headers, `-k`, colour control.
+- 78 unit tests covering version classification, probe construction and verdicts.
+
+## exploit-kit 1.0.0 — 2026-10-22
+
+### Added
+
+- Stage 0 worker rotation, stage 1 heap base leak, stage 2 libphp base leak.
+- Offsets derived from `php:8.4.26-apache` with `nm` rather than inherited from
+  the public PoC.
+- `--diagnose` mode, which reports mechanism analysis instead of running the chain.
+- `FINDINGS.md` with the full lab evidence, including what did not work.
+
+### Known limitations
+
+- Stage 3 does not land: the carrier never reaches `PS(http_session_vars)`.
+- Full RCE is **not** reproduced, and is not claimed anywhere in this repo.
