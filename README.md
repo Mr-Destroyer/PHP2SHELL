@@ -166,3 +166,45 @@ PHP2SHELL/
 
 ## Documentation
 
+| Document | Contents |
+|---|---|
+| [`docs/detection-methodology.md`](docs/detection-methodology.md) | Control/probe design, escalation, verdict rules |
+| [`docs/exploit-chain.md`](docs/exploit-chain.md) | Stages 0–3, offsets, why stage 3 stalls |
+| [`docs/cli-reference.md`](docs/cli-reference.md) | Every flag on both tools |
+| [`docs/architecture.md`](docs/architecture.md) | Module map and data flow |
+| [`docs/lab-setup.md`](docs/lab-setup.md) | Rebuild the docker lab from scratch |
+| [`docs/threat-model.md`](docs/threat-model.md) | What the tools assume about the target |
+| [`docs/faq.md`](docs/faq.md) | Backports, WAFs, `memory_limit=-1`, workers |
+
+---
+
+## Running the tests
+
+```bash
+cd scanner && python3 -m unittest discover -s tests -v
+```
+
+78 tests, standard library only. They cover version classification, probe body
+construction, verdict rules and the UI rendering — the parts where a wrong answer
+would be silently wrong.
+
+---
+
+## Authorised use only
+
+These tools send large bodies and deliberately crash PHP workers. Run them
+against systems you own or have **written** permission to test. The scanner is
+non-destructive by design but still triggers fatal errors; the exploit kit is
+explicitly destructive to the worker it hits.
+
+The author accepts no liability for use against systems without authorisation.
+
+---
+
+<div align="center">
+
+**ZIM** · [@Mr-Destroyer](https://github.com/Mr-Destroyer) · [YouTube @study_hard69](https://youtube.com/@study_hard69)
+
+MIT licensed — see [LICENSE](LICENSE).
+
+</div>
