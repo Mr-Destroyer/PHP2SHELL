@@ -192,3 +192,100 @@ def load_targets(args: argparse.Namespace) -> list[str]:
 
     # Deduplicate while preserving order.
     seen: set[str] = set()
+    unique: list[str] = []
+    for target in targets:
+        if target not in seen:
+            seen.add(target)
+            unique.append(target)
+    return unique
+
+
+def run_ui_mode(args: argparse.Namespace, targets: list[str]) -> int:
+    """Serve the browser UI. Every scan is started explicitly by the user."""
+    from .ui import run_ui  # imported lazily: the CLI works without it
+
+    banner()
+    if targets:
+        print(colorize(
+            f"  UI mode: {len(targets)} target(s) queued. Each scan still sends "
+            f"up to {args.max_probe_mib} MiB per probe.\n", C.YELLOW))
+    else:
+        print(colorize(
+            "  UI mode: enter a target in the browser to begin.\n", C.YELLOW))
+
+    return run_ui(
+        targets=targets,
+        timeout=args.timeout,
+        connect_timeout=args.connect_timeout,
+        verify_ssl=not args.insecure,
+        sapi=args.sapi,
+        headers=parse_headers(args.header),
+        max_probe_mib=args.max_probe_mib,
+        port=args.port,
+        open_browser=not args.no_open,
+    )
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="php2shell-scan",
+        description="Detect php2shell (CVE-2026-109618 / CVE-2026-109619) exposure.",
+        epilog=(
+            "The scanner triggers a memory-exhaustion condition to detect the "
+            "vulnerability behaviourally. This may crash a PHP worker. Only "
+            "scan systems you are authorised to test."
+        ),
+    )
+    parser.add_argument("-u", "--url", action="append", metavar="URL",
+                        help="target URL (repeatable)")
+    parser.add_argument("-l", "--list", metavar="FILE",
+                        help="file of targets, one per line")
+    parser.add_argument("-t", "--threads", type=int, default=5, metavar="N",
+                        help="concurrent scans (default: 5)")
+    parser.add_argument("--timeout", type=float, default=60.0, metavar="SEC",
+                        help="per-request timeout (default: 60)")
+    parser.add_argument("--connect-timeout", type=float, default=10.0,
+                        metavar="SEC", help="connect timeout (default: 10)")
+    parser.add_argument("--max-probe-mib", type=int, default=20, metavar="N",
+                        help="largest probe to send, in MiB (default: 20)")
+    parser.add_argument("--sapi", choices=("auto", "mod_php", "fpm"),
+                        default="auto", help="restrict verdict rules to one SAPI")
+    parser.add_argument("-H", "--header", action="append", metavar="K:V",
+                        help="extra request header (repeatable)")
+    parser.add_argument("-k", "--insecure", action="store_true",
+                        help="skip TLS certificate verification")
+    parser.add_argument("-o", "--output", metavar="FILE",
+                        help="write JSON results to FILE")
+    parser.add_argument("--all-results", action="store_true",
+                        help="include non-vulnerable results in JSON output")
+    parser.add_argument("-v", "--verbose", action="store_true",
+                        help="show per-probe detail")
+    parser.add_argument("-q", "--quiet", action="store_true",
+                        help="only print vulnerable targets")
+    parser.add_argument("--no-color", action="store_true",
+                        help="disable ANSI colors")
+    parser.add_argument("--yes", action="store_true",
+                        help="skip the interactive confirmation prompt")
+    parser.add_argument("--ui", action="store_true",
+                        help="launch the interactive browser UI")
+    parser.add_argument("--port", type=int, default=0, metavar="N",
+                        help="UI port (default: pick a free port)")
+    parser.add_argument("--no-open", action="store_true",
+                        help="do not open a browser automatically")
+    parser.add_argument("--version", action="version",
+                        version=f"php2shell-scanner {VERSION}")
+    return parser
+
+
+def parse_headers(raw: Optional[list[str]]) -> dict[str, str]:
+    headers: dict[str, str] = {}
+    for item in raw or []:
+        name, sep, value = item.partition(":")
+        if not sep:
+            print(colorize(f"warning: ignoring malformed header {item!r}", C.YELLOW),
+                  file=sys.stderr)
+            continue
+        headers[name.strip()] = value.strip()
+    return headers
+
+
