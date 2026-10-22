@@ -109,3 +109,115 @@ class Transport:
         read_response: bool = True,
     ) -> Response:
         """
+        Perform one HTTP exchange.
+
+        The response is read on a background thread so that we capture headers
+        and any partial body even when the server aborts mid-request.
+        """
+        started = time.monotonic()
+        result = Response(bytes_sent=len(body))
+
+        try:
+            parts = urlsplit(url)
+        except ValueError as exc:
+            result.error = f"invalid URL: {exc}"
+            return result
+
+        scheme = (parts.scheme or "http").lower()
+        if scheme not in ("http", "https"):
+            result.error = f"unsupported scheme: {scheme}"
+            return result
+
+        host = parts.hostname
+        if not host:
+            result.error = "URL has no host"
+            return result
+
+        port = parts.port or (443 if scheme == "https" else 80)
+        path = parts.path or "/"
+        if parts.query:
+            path += "?" + parts.query
+
+        # Build headers. Host must include the port when it is non-default.
+        hdrs: dict[str, str] = {
+            "Host": host if port in (80, 443) else f"{host}:{port}",
+            "User-Agent": self.user_agent,
+            "Accept": "*/*",
+            "Accept-Encoding": "identity",
+            "Connection": "close",
+        }
+        for key, value in (headers or {}).items():
+            # Caller-supplied headers win, but never let them set Host twice.
+            if key.lower() == "host":
+                hdrs["Host"] = value
+            else:
+                hdrs[key] = value
+
+        if body or method in ("POST", "PUT", "PATCH"):
+            hdrs.setdefault("Content-Length", str(len(body)))
+
+        head = f"{method} {path} HTTP/1.1\r\n"
+        head += "".join(f"{k}: {v}\r\n" for k, v in hdrs.items())
+        head += "\r\n"
+        head_bytes = head.encode("latin-1", errors="replace")
+
+        sock: Optional[socket.socket] = None
+        try:
+            sock = self._connect(scheme, host, port)
+            sock.settimeout(self.timeout)
+
+            if not read_response:
+                sock.sendall(head_bytes)
+                if body:
+                    self._send_body(sock, body)
+                result.status = 0
+                return result
+
+            # Reader thread: start before sending so nothing is missed.
+            raw = bytearray()
+            read_error: list[str] = []
+
+            def _reader() -> None:
+                try:
+                    while len(raw) < MAX_HEADER_BYTES + self.body_limit:
+                        chunk = sock.recv(65536)
+                        if not chunk:
+                            break
+                        raw.extend(chunk)
+                except (OSError, ssl.SSLError) as exc:
+                    read_error.append(str(exc))
+
+            reader = threading.Thread(target=_reader, daemon=True)
+            reader.start()
+
+            try:
+                sock.sendall(head_bytes)
+                if body:
+                    self._send_body(sock, body)
+            except (BrokenPipeError, ConnectionResetError, ssl.SSLError):
+                # Expected: the worker died while we were still uploading.
+                # Whatever the reader captured is still valid evidence.
+                pass
+            except OSError as exc:
+                result.error = f"send failed: {exc}"
+
+            reader.join(timeout=self.timeout + 2.0)
+
+            self._parse(raw, result)
+
+            if result.error is None and read_error and not raw:
+                result.error = f"read failed: {read_error[0]}"
+
+        except socket.timeout:
+            result.error = "timed out"
+        except ssl.SSLError as exc:
+            result.error = f"TLS error: {exc}"
+        except OSError as exc:
+            result.error = f"connection error: {exc}"
+        finally:
+            if sock is not None:
+                try:
+                    sock.close()
+                except OSError:
+                    pass
+            result.elapsed = time.monotonic() - started
