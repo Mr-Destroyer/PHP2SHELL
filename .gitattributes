@@ -1,0 +1,18 @@
+* text=auto eol=lf
+
+*.py   text diff=python
+*.md   text diff=markdown
+*.yml  text
+*.yaml text
+*.json text
+*.svg  text
+*.html text
+*.css  text
+*.js   text
+
+scan            text eol=lf
+exploit         text eol=lf
+
+# Binary artefacts are never tracked here
+*.pcap    binary
+*.pcapng  binary
