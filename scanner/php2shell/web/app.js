@@ -280,3 +280,145 @@
 
         const cx = (x0 + x1) / 2;
         const cy = (y0 + y1) / 2;
+        const dx = (cx - 4) * rand(4.5, 10) + rand(-24, 56);
+        const dy = (cy - 46) * rand(3.6, 8.4) - rand(10, 80);
+        const rot = rand(-85, 85);
+        const scale = rand(0.82, 1.08);
+
+        piece.animate(
+          [
+            { transform: 'translate(0, 0) rotate(0deg) scale(1)', opacity: 1 },
+            {
+              transform: `translate(${dx}px, ${dy}px) rotate(${rot}deg) scale(${scale})`,
+              opacity: 0,
+            },
+          ],
+          {
+            duration: rand(720, 1180),
+            delay: n * 11,
+            easing: 'cubic-bezier(.14,.72,.28,1)',
+            fill: 'forwards',
+          },
+        );
+        n++;
+      }
+    }
+    setTimeout(() => { fragments.innerHTML = ''; }, 1900);
+  }
+
+  /* ── stamp ─────────────────────────────────────────────────────────── */
+
+  function stamp(text, tone) {
+    cardStamp.textContent = text;
+    cardStamp.style.color = tone === 'safe' ? 'var(--cyan)' : 'var(--red)';
+    cardStamp.classList.remove('show');
+    void cardStamp.offsetWidth;
+    cardStamp.classList.add('show');
+    Sfx.stamp();
+  }
+
+  function clearStamp() {
+    cardStamp.classList.remove('show');
+    cardStamp.textContent = '';
+  }
+
+  /* ── choreography ──────────────────────────────────────────────────── */
+
+  const VERDICTS = {
+    VULNERABLE:      { tone: 'vulnerable', label: 'VULNERABLE' },
+    LIKELY:          { tone: 'vulnerable', label: 'LIKELY VULNERABLE' },
+    FIXED:           { tone: 'safe',       label: 'FIXED' },
+    NOT_VULNERABLE:  { tone: 'safe',       label: 'NO SIGNAL' },
+    INCONCLUSIVE:    { tone: 'error',      label: 'INCONCLUSIVE' },
+    ERROR:           { tone: 'error',      label: 'ERROR' },
+  };
+
+  async function perform(result) {
+    const meta = VERDICTS[result.verdict] || { tone: 'error', label: result.verdict };
+    const vulnerable = meta.tone === 'vulnerable';
+    const safe = meta.tone === 'safe';
+    const unreachable = meta.tone === 'error';
+
+    app.dataset.verdict = meta.tone;
+
+    if (unreachable) {
+      setPhase('noreach');
+      say('Hm. Can\u2019t even reach it.');
+      await wait(700);
+      setPhase('idle');
+      await wait(400);
+      return;
+    }
+
+    // Measure before the dash: the fist travels to just inside the card's
+    // left edge when the punch lands, or stops short when it does not.
+    const geo = measure(vulnerable ? 18 : -22);
+    applyGeometry(geo);
+
+    setPhase('windup');
+    say('One punch.');
+    await wait(600);
+
+    makeGhosts();
+    Sfx.whoosh();
+    dust.classList.add('on');
+    setTimeout(() => dust.classList.remove('on'), 760);
+    setPhase('dash');
+    await wait(230);
+
+    setPhase('impact');
+    fireFx(!vulnerable);
+    Sfx.boom();
+
+    if (vulnerable) {
+      card.dataset.state = 'vulnerable';
+      cardStatus.textContent = 'crash signal';
+      stamp('VULNERABLE', 'red');
+      shatter();
+      await wait(90);
+      card.dataset.state = 'shattered';
+      await wait(500);
+    } else {
+      // The fist never lands. The card survives, and he says so.
+      card.dataset.state = 'safe';
+      card.classList.add('wobble');
+      setTimeout(() => card.classList.remove('wobble'), 640);
+      Sfx.tink();
+      stamp('INTACT', 'safe');
+      await wait(120);
+      setPhase('miss');
+      say('Not punchable.');
+      await wait(760);
+    }
+
+    setPhase('idle');
+    await wait(520);
+  }
+
+  /* ── verdict panel ─────────────────────────────────────────────────── */
+
+  function showVerdict(r) {
+    const meta = VERDICTS[r.verdict] || { tone: 'error', label: r.verdict };
+    vLabel.textContent = meta.label;
+    vConf.textContent = r.confidence ? `${r.confidence} confidence` : '';
+    vVersion.textContent = r.version || 'not advertised';
+    vSignal.textContent = r.signal && r.signal !== 'none' ? r.signal : 'no crash signal';
+    vElapsed.textContent = `${Number(r.elapsed_seconds || 0).toFixed(2)}s`;
+    vSent.textContent = fmtBytes(r.bytes_sent);
+    vReason.textContent = r.reason || r.error || '';
+
+    cardStatus.textContent = meta.label.toLowerCase();
+    const caveats = [];
+    if (r.verdict === 'NOT_VULNERABLE' && r.confidence === 'NONE') {
+      caveats.push('Not proof of safety: a WAF, proxy limit, or hardened config can suppress the crash signal.');
+    }
+    if (r.verdict === 'LIKELY') {
+      caveats.push('Version data only. Distro backports can carry the fix under the same version number.');
+    }
+    if (r.verdict === 'INCONCLUSIVE' || r.verdict === 'ERROR') {
+      caveats.push('The scan did not establish a baseline. No conclusion about exposure.');
+    }
+    vCaveat.textContent = caveats.join(' ');
+    vCaveat.hidden = caveats.length === 0;
+
+    verdictPanel.hidden = false;
