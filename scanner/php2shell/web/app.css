@@ -1,0 +1,156 @@
+/* ==========================================================================
+   php2shell — one punch
+   A manga-styled stage. The hero is a hand-built SVG rig: every limb is a
+   group with a transform-origin, poses are CSS transforms, and the phase is
+   a single data attribute on #app. Transitions do the in-betweening, so the
+   motion stays smooth without a timeline library.
+   ========================================================================== */
+
+:root {
+  --ink: #07070b;
+  --ink-2: #0d0d14;
+  --paper: #f4efe2;
+  --yellow: #ffd23f;
+  --yellow-deep: #eda321;
+  --red: #ff2d3f;
+  --red-deep: #a80c1b;
+  --cyan: #38e1d0;
+  --muted: #8d8d9e;
+  --line: rgba(255, 255, 255, .1);
+
+  /* Set by JS at impact time. */
+  --fx-x: 62%;
+  --fx-y: 50%;
+  --dash-x: 0px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--ink);
+  color: var(--paper);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+               "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+
+/* .help/.verdict set display, which would otherwise defeat [hidden]. */
+[hidden] { display: none !important; }
+
+#app {
+  position: relative;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  isolation: isolate;
+}
+
+/* paper grain + vignette */
+.grain {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 90;
+  opacity: .055;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,\
+<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'>\
+<filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/></filter>\
+<rect width='140' height='140' filter='url(%23n)'/></svg>");
+}
+
+/* ── top bar ──────────────────────────────────────────────────────────── */
+
+.topbar {
+  position: relative;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(7, 7, 11, .9), rgba(7, 7, 11, .35));
+  backdrop-filter: blur(6px);
+}
+
+.brand { display: flex; align-items: center; gap: 12px; }
+
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 9px;
+  background: var(--yellow);
+  color: #101014;
+  font-weight: 900;
+  font-size: 21px;
+  transform: rotate(-4deg);
+  box-shadow: 3px 3px 0 rgba(0, 0, 0, .6);
+}
+
+.brand-text { display: flex; flex-direction: column; line-height: 1.15; }
+.brand-text b { font-size: 15px; letter-spacing: .12em; text-transform: uppercase; }
+.brand-text i {
+  font-style: normal;
+  font-size: 10.5px;
+  letter-spacing: .18em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.topbar-right { display: flex; align-items: center; gap: 10px; }
+
+.conn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 11px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.conn i {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--muted);
+  transition: background .3s, box-shadow .3s;
+}
+.conn[data-state="scanning"] { color: var(--yellow); }
+.conn[data-state="scanning"] i { background: var(--yellow); box-shadow: 0 0 10px var(--yellow); animation: pulse 1s infinite; }
+.conn[data-state="done"] { color: var(--cyan); }
+.conn[data-state="done"] i { background: var(--cyan); box-shadow: 0 0 10px var(--cyan); }
+.conn[data-state="vulnerable"] { color: var(--red); }
+.conn[data-state="vulnerable"] i { background: var(--red); box-shadow: 0 0 10px var(--red); }
+.conn[data-state="error"] { color: var(--red); }
+.conn[data-state="error"] i { background: var(--red); }
+
+@keyframes pulse { 50% { opacity: .35; } }
+
+.ghost-btn {
+  padding: 6px 11px;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  font-size: 11px;
+  letter-spacing: .13em;
+  text-transform: uppercase;
+  color: var(--muted);
+  text-decoration: none;
+  transition: color .2s, border-color .2s, background .2s;
+}
+.ghost-btn:hover { color: var(--paper); border-color: rgba(255, 255, 255, .3); background: rgba(255, 255, 255, .05); }
+.ghost-btn[aria-pressed="false"] { color: var(--red); border-color: rgba(255, 45, 63, .4); }
+
+/* ── stage ────────────────────────────────────────────────────────────── */
+
+.stage {
+  position: relative;
