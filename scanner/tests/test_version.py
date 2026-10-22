@@ -60,3 +60,66 @@ class TestParseVersion(unittest.TestCase):
         self.assertIs(info.status, PatchStatus.UNKNOWN_BRANCH)
         self.assertFalse(info.is_vulnerable)
 
+    def test_no_version(self):
+        self.assertIsNone(parse_version(""))
+        self.assertIsNone(parse_version("nginx/1.24.0"))
+        self.assertIsNone(parse_version("just some text"))
+
+    def test_bare_version_requires_opt_in(self):
+        # A bare version is only accepted when explicitly requested, so that
+        # "nginx/1.24.0" is never mistaken for PHP.
+        self.assertIsNone(parse_version("8.4.26"))
+        info = parse_version("8.4.26", allow_bare=True)
+        self.assertIsNotNone(info)
+        self.assertIs(info.status, PatchStatus.VULNERABLE)
+
+    def test_non_php_versions_rejected(self):
+        # These appear in Server / X-Powered-By headers constantly.
+        for raw in ("nginx/1.24.0", "OpenSSL/3.0.11", "Apache/2.4.62",
+                    "jQuery/3.6.0", "Bootstrap/5.3.0"):
+            with self.subTest(raw=raw):
+                self.assertIsNone(parse_version(raw))
+
+    def test_case_insensitive(self):
+        for raw in ("php/8.4.26", "PHP 8.4.26", "Php/8.4.26"):
+            with self.subTest(raw=raw):
+                info = parse_version(raw)
+                self.assertIsNotNone(info)
+                self.assertIs(info.status, PatchStatus.VULNERABLE)
+
+
+class TestHeaderExtraction(unittest.TestCase):
+    def test_x_powered_by(self):
+        info = extract_from_headers({"X-Powered-By": "PHP/8.4.26"})
+        self.assertIsNotNone(info)
+        self.assertIs(info.status, PatchStatus.VULNERABLE)
+
+    def test_case_insensitive_headers(self):
+        info = extract_from_headers({"x-powered-by": "PHP/8.4.27"})
+        self.assertIsNotNone(info)
+        self.assertIs(info.status, PatchStatus.FIXED)
+
+    def test_no_php_header(self):
+        self.assertIsNone(extract_from_headers({"Server": "nginx/1.24.0"}))
+
+    def test_empty(self):
+        self.assertIsNone(extract_from_headers({}))
+
+
+class TestBodyExtraction(unittest.TestCase):
+    def test_php_version_in_body(self):
+        info = extract_from_body(b"<div>Powered by PHP/8.4.26</div>")
+        self.assertIsNotNone(info)
+        self.assertIs(info.status, PatchStatus.VULNERABLE)
+
+    def test_ignores_unrelated_versions(self):
+        # jQuery/Bootstrap versions must not be mistaken for PHP.
+        body = b"<script src='jquery-3.6.0.min.js'></script>"
+        self.assertIsNone(extract_from_body(body))
+
+    def test_empty_body(self):
+        self.assertIsNone(extract_from_body(b""))
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
