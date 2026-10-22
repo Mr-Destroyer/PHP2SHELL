@@ -80,3 +80,86 @@
               C84,250 88,282 98,308"/>
           </g>
 
+          <!-- legs -->
+          <g id="legBack" class="leg">
+            <rect class="suit-limb" x="118" y="198" width="24" height="60" rx="12"/>
+            <rect class="suit-limb" x="119" y="250" width="22" height="56" rx="11"/>
+            <path class="boot" d="M117,298 h26 v14 a10,10 0 0 1 -10,10 h-8 a8,8 0 0 1 -8,-8 z"/>
+            <path class="boot-toe" d="M117,308 h32 a6,6 0 0 1 0,12 h-32 z"/>
+          </g>
+
+          <!-- upper body pivots at the hips -->
+          <g id="upperBody">
+            <g id="armBack" class="arm">
+              <rect class="suit-limb" x="109" y="110" width="18" height="54" rx="9"/>
+              <g id="foreBack" class="fore">
+                <rect class="suit-limb" x="110" y="158" width="16" height="42" rx="8"/>
+                <rect class="cuff" x="107" y="192" width="22" height="10" rx="5"/>
+                <circle class="fist" cx="118" cy="210" r="15"/>
+              </g>
+            </g>
+
+            <g id="torso">
+              <path class="torso-body" d="M112,106 C118,96 182,96 188,106
+                C195,118 197,150 195,176 C194,190 191,200 187,205
+                L113,205 C109,200 106,190 105,176 C103,150 105,118 112,106 Z"/>
+              <path class="torso-shade" d="M112,106 C118,96 182,96 188,106
+                C195,118 197,150 195,176 C194,190 191,200 187,205
+                L150,205 L150,98 Z" opacity=".14"/>
+              <rect class="belt" x="107" y="192" width="86" height="13" rx="4"/>
+              <rect class="buckle" x="142" y="189" width="17" height="18" rx="3"/>
+              <path class="zipper" d="M150,104 V192"/>
+            </g>
+
+            <g id="head">
+              <rect class="neck" x="139" y="86" width="22" height="24" rx="6"/>
+              <circle class="skull" cx="150" cy="66" r="31"/>
+              <path class="head-shine" d="M126,50 C132,36 152,31 168,38" />
+              <ellipse class="ear" cx="128" cy="72" rx="5" ry="7"/>
+              <g class="face">
+                <path class="brow" d="M139,58 l12,3"/>
+                <path class="brow" d="M161,61 l12,-3"/>
+                <ellipse class="eye" cx="146" cy="67" rx="3.4" ry="5.4"/>
+                <ellipse class="eye" cx="166" cy="67" rx="3.4" ry="5.4"/>
+                <path class="nose" d="M169,74 l5,6"/>
+                <path class="mouth" d="M158,86 h12"/>
+              </g>
+            </g>
+
+            <g id="armFront" class="arm">
+              <rect class="suit-limb" x="173" y="110" width="18" height="54" rx="9"/>
+              <g id="foreFront" class="fore">
+                <rect class="suit-limb" x="174" y="158" width="16" height="42" rx="8"/>
+                <rect class="cuff" x="171" y="192" width="22" height="10" rx="5"/>
+                <circle class="fist" cx="182" cy="210" r="16"/>
+                <circle class="fist-shine" cx="177" cy="205" r="5"/>
+              </g>
+            </g>
+          </g>
+
+          <!-- front leg -->
+          <g id="legFront" class="leg">
+            <rect class="suit-limb" x="158" y="198" width="24" height="60" rx="12"/>
+            <rect class="suit-limb" x="159" y="250" width="22" height="56" rx="11"/>
+            <path class="boot" d="M157,298 h26 v14 a10,10 0 0 1 -10,10 h-8 a8,8 0 0 1 -8,-8 z"/>
+            <path class="boot-toe" d="M157,308 h32 a6,6 0 0 1 0,12 h-32 z"/>
+          </g>
+
+        </g>
+        </g>
+      </svg>
+    </div>
+
+    <!-- ── target ───────────────────────────────────────────────────── -->
+    <div class="target-wrap" id="targetWrap">
+      <div class="target-card" id="card" data-state="idle">
+        <div class="card-scan" aria-hidden="true"></div>
+        <div class="card-head">
+          <span class="card-dot" aria-hidden="true"></span>
+          <span class="card-label">TARGET</span>
+          <span class="card-status" id="cardStatus">idle</span>
+        </div>
+        <div class="card-url" id="cardUrl">no target</div>
+        <div class="card-meta" id="cardMeta">enter a URL below</div>
+        <div class="card-probes" id="cardProbes"></div>
+        <div class="card-stamp" id="cardStamp" aria-hidden="true"></div>
