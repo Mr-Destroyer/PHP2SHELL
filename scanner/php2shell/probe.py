@@ -307,3 +307,106 @@ def parse_post_max_size(body: bytes) -> Optional[int]:
     """
     if not body or POST_MAX_MARKER not in body:
         return None
+    match = POST_MAX_LIMIT_RE.search(body)
+    if match is None:
+        return None
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
+
+
+def memory_cost(size_mib: int) -> int:
+    """Approximate native memory a probe of this wire size will cost PHP."""
+    return size_mib * (1 << 20) * MEMORY_AMPLIFICATION
+
+
+# ---------------------------------------------------------------------------
+# Signal analysis
+# ---------------------------------------------------------------------------
+
+def detect_signal(
+    control: Response,
+    probe: Response,
+    sapi: str = "auto",
+) -> tuple[Optional[Signal], str]:
+    """
+    Decide whether a probe response constitutes a crash signal.
+
+    Returns (signal, human-readable detail). signal is None when the response
+    is not diagnostic.
+
+    The `control` response is essential: every differential check compares
+    against it, so a target that is uniformly broken cannot produce a
+    false positive.
+    """
+    # Normalize first: PHP renders fatals as HTML by default, and the tags
+    # break literal marker matching.
+    body = normalize_body(probe.body or b"")
+
+    # --- 1. In-band PHP fatal naming an initialization-time location -------
+    # This is the strongest signal: PHP told us it died while parsing the
+    # request, before any application code ran.
+    has_oom = any(marker in body for marker in OOM_MARKERS)
+    has_init_loc = any(marker in body for marker in INIT_LOCATION_MARKERS)
+
+    if has_oom and has_init_loc:
+        return (
+            Signal.IN_BAND_FATAL,
+            "response contains a PHP memory-exhaustion fatal located in "
+            "'Unknown on line 0', i.e. raised during request initialization "
+            "before any script executed",
+        )
+
+    # An OOM that names a real file/line is an application-level error, not
+    # the vulnerability. Report it as no signal, but note it.
+    if has_oom and not has_init_loc:
+        return (None, "memory exhaustion in application code (not a signal)")
+
+    # --- 2. Differential empty 500 ----------------------------------------
+    # The control produced output, the probe produced nothing, and the status
+    # is 500. The worker died mid-request.
+    if probe.status == 500 and control.body and not body:
+        return (
+            Signal.EMPTY_500,
+            "HTTP 500 with an empty body, although the control request "
+            "produced output -- the request handler died mid-request",
+        )
+
+    # --- 3. Frontend reports the upstream died ----------------------------
+    # Only meaningful for FPM-fronted setups, and only when the control
+    # request succeeded (otherwise the backend was already down).
+    if sapi in ("auto", "fpm") and probe.status in UPSTREAM_DEAD_STATUSES:
+        if control.ok and control.status and control.status < 500:
+            return (
+                Signal.UPSTREAM_DEAD,
+                f"HTTP {probe.status} from the frontend while the control "
+                f"request succeeded -- the PHP-FPM worker died mid-request",
+            )
+
+    # --- 4. Empty 200 after a control that produced output ----------------
+    # Some FPM setups swallow the error and return an empty 200 when the
+    # worker dies. Weaker than a 500, but still differential.
+    if sapi in ("auto", "fpm") and probe.status == 200 and control.body and not body:
+        return (
+            Signal.EMPTY_200,
+            "HTTP 200 with an empty body although the control request "
+            "produced output -- consistent with a worker dying mid-request",
+        )
+
+    return (None, "")
+
+
+def is_rejected(response: Response) -> bool:
+    """True when the request was refused before PHP could parse the body."""
+    return response.status in REJECTED_STATUSES
+
+
+def describe_response(response: Response, limit: int = 200) -> str:
+    """One-line summary of a response, for verbose output."""
+    if response.error:
+        return f"error: {response.error}"
+    snippet = response.body_text(limit).replace("\n", " ").strip()
+    if len(snippet) > limit:
+        snippet = snippet[:limit] + "..."
+    return f"HTTP {response.status} ({len(response.body)} bytes) {snippet!r}"
