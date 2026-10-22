@@ -99,3 +99,104 @@ class TestJobReplay(unittest.TestCase):
         app = UiApp(options, [])
         with MockTarget() as url:
             job = app.start_job(url)
+            seen = [e for e in job.follow(0) if e is not None]
+
+        self.assertEqual(seen[0]["type"], "start")
+        self.assertEqual(seen[-1]["type"], "done")
+        self.assertTrue(any(e["type"] == "result" for e in seen))
+
+        # A late subscriber gets the full history, not just new events.
+        replay = [e for e in job.follow(0) if e is not None]
+        self.assertEqual(len(replay), len(seen))
+
+
+class TestUiServer(unittest.TestCase):
+    def setUp(self):
+        options = {
+            "timeout": 15.0, "connect_timeout": 5.0, "verify_ssl": False,
+            "sapi": "auto", "headers": {}, "max_probe_mib": 1,
+        }
+        self.app = UiApp(options, ["http://example.test/"])
+        self.httpd = UiServer(("127.0.0.1", 0), self.app)
+        self.port = self.httpd.server_address[1]
+        self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
+        self.thread.start()
+
+    def tearDown(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+    def url(self, path, token=True):
+        base = f"http://127.0.0.1:{self.port}{path}"
+        if token:
+            sep = "&" if "?" in base else "?"
+            base += f"{sep}token={self.app.token}"
+        return base
+
+    def test_index_requires_token(self):
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(self.url("/", token=False), timeout=5)
+        self.assertEqual(ctx.exception.code, 403)
+        ctx.exception.close()
+
+    def test_index_served_with_token(self):
+        body = urllib.request.urlopen(self.url("/"), timeout=5).read().decode()
+        self.assertIn("one punch", body.lower())
+        self.assertIn("heroPose", body)
+
+    def test_assets_served(self):
+        css = urllib.request.urlopen(self.url("/app.css"), timeout=5).read()
+        js = urllib.request.urlopen(self.url("/app.js"), timeout=5).read()
+        self.assertIn(b"@keyframes", css)
+        self.assertIn(b"perform", js)
+
+    def test_config_exposes_defaults(self):
+        raw = urllib.request.urlopen(self.url("/api/config"), timeout=5).read()
+        cfg = json.loads(raw)
+        self.assertEqual(cfg["targets"], ["http://example.test/"])
+        self.assertEqual(cfg["options"]["max_probe_mib"], 1)
+
+    def test_scan_rejects_bad_token(self):
+        req = urllib.request.Request(
+            self.url("/api/scan", token=False),
+            data=b'{"target":"http://example.test/"}',
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(req, timeout=5)
+        self.assertEqual(ctx.exception.code, 403)
+        ctx.exception.close()
+
+    def test_scan_rejects_empty_target(self):
+        req = urllib.request.Request(
+            self.url("/api/scan"),
+            data=b'{"target":"  "}',
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(req, timeout=5)
+        self.assertEqual(ctx.exception.code, 400)
+        ctx.exception.close()
+
+    def test_scan_starts_a_job(self):
+        req = urllib.request.Request(
+            self.url("/api/scan"),
+            data=b'{"target":"http://example.test/"}',
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        payload = json.loads(urllib.request.urlopen(req, timeout=5).read())
+        self.assertIn("id", payload)
+        self.assertIsNotNone(self.app.job(payload["id"]))
+
+    def test_unknown_asset_is_404(self):
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(self.url("/../ui.py"), timeout=5)
+        self.assertIn(ctx.exception.code, (403, 404))
+        ctx.exception.close()
+
+
+if __name__ == "__main__":
+    unittest.main()
