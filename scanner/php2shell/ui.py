@@ -121,3 +121,127 @@ class UiApp:
         self.options = options
         self.targets = targets
         self.host = host
+        self.token = secrets.token_urlsafe(24)
+        self.jobs: dict[str, Job] = {}
+        self.lock = threading.Lock()
+        self.httpd: Optional[ThreadingHTTPServer] = None
+
+    # -- jobs ------------------------------------------------------------
+
+    def start_job(self, target: str) -> Job:
+        job = Job(secrets.token_hex(8), target, self.options)
+        with self.lock:
+            self.jobs[job.id] = job
+            # Keep the registry small; results are printed to the terminal.
+            if len(self.jobs) > 32:
+                for stale in list(self.jobs)[:-16]:
+                    self.jobs.pop(stale, None)
+        threading.Thread(target=job.run, daemon=True).start()
+        return job
+
+    def job(self, job_id: str) -> Optional[Job]:
+        with self.lock:
+            return self.jobs.get(job_id)
+
+
+class UiHandler(BaseHTTPRequestHandler):
+    server_version = "php2shell-ui"
+    protocol_version = "HTTP/1.1"
+
+    # -- plumbing --------------------------------------------------------
+
+    @property
+    def app(self) -> UiApp:
+        return self.server.app  # type: ignore[attr-defined]
+
+    def log_message(self, fmt: str, *args: Any) -> None:  # noqa: A003
+        # The terminal output belongs to the scanner, not to request noise.
+        pass
+
+    def _query(self) -> dict[str, list[str]]:
+        return parse_qs(urlsplit(self.path).query)
+
+    def _authorised(self) -> bool:
+        supplied = (self._query().get("token") or [""])[0]
+        if not supplied:
+            supplied = self.headers.get("X-Auth-Token", "")
+        return secrets.compare_digest(supplied, self.app.token)
+
+    def _send(self, status: int, body: bytes, ctype: str) -> None:
+        self.send_response(status)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
+    def _json(self, status: int, payload: Any) -> None:
+        self._send(status, json.dumps(payload).encode(), "application/json")
+
+    # -- routes ----------------------------------------------------------
+
+    def do_GET(self) -> None:  # noqa: N802
+        path = urlsplit(self.path).path
+
+        if path in ASSETS:
+            name, ctype = ASSETS[path]
+            # The page's own <link>/<script> requests cannot carry the token,
+            # so only the document itself is gated. Static assets are inert.
+            if path in ("/", "/index.html") and not self._authorised():
+                self._send(403, _DENIED, "text/html; charset=utf-8")
+                return
+            try:
+                data = (WEB_ROOT / name).read_bytes()
+            except OSError:
+                self._send(500, b"asset missing", "text/plain")
+                return
+            self._send(200, data, ctype)
+            return
+
+        if not self._authorised():
+            self._send(403, _DENIED, "text/html; charset=utf-8")
+            return
+
+        if path == "/api/config":
+            self._json(200, {
+                "targets": self.app.targets,
+                "options": {
+                    "max_probe_mib": self.app.options["max_probe_mib"],
+                    "sapi": self.app.options["sapi"],
+                },
+            })
+            return
+
+        if path == "/api/events":
+            job_id = (self._query().get("id") or [""])[0]
+            job = self.app.job(job_id)
+            if job is None:
+                self._json(404, {"error": "unknown job"})
+                return
+            self._stream(job)
+            return
+
+        self._json(404, {"error": "not found"})
+
+    def do_POST(self) -> None:  # noqa: N802
+        path = urlsplit(self.path).path
+        if not self._authorised():
+            self._json(403, {"error": "bad token"})
+            return
+
+        if path == "/api/scan":
+            self._start_scan()
+            return
+
+        if path == "/api/quit":
+            self._json(200, {"ok": True})
+            threading.Thread(target=self.server.shutdown, daemon=True).start()
+            return
+
+        self._json(404, {"error": "not found"})
+
+    def _start_scan(self) -> None:
+        try:
