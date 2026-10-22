@@ -218,3 +218,76 @@ stays up for repeat scans until you press `Ctrl-C`.
 | 0 | No vulnerable targets found |
 | 1 | At least one vulnerable target |
 | 2 | Usage or I/O error |
+| 130 | Interrupted |
+
+---
+
+## Network impact
+
+Per tested path: one 42-byte control request plus up to three probes totalling
+**~29 MiB**. Probing stops as soon as the verdict is settled, so a vulnerable
+target typically receives **~1 MiB**.
+
+**This is intrusive by design.** Triggering OOM can crash a PHP worker. In most
+deployments the worker is replaced immediately, but on a single-worker setup
+the target may be briefly unavailable. Use `--max-probe-mib` to reduce impact.
+
+Only scan systems you own or have written permission to test.
+
+---
+
+## Tests
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
+71 tests covering:
+
+- **Version classification** — every branch boundary, EOL branches, and
+  rejection of non-PHP versions (`nginx/1.24.0` must not parse as PHP)
+- **Signal detection** — plain-text and HTML-rendered fatals, the
+  `memory_limit=-1` variant, and every false-positive shape
+- **Integration** — full scan flow against a mock server for vulnerable,
+  patched, patched-but-OOM, WAF-blocked, and broken targets
+- **UI plumbing** — event ordering and payloads, job replay, token enforcement
+  on the local server, and asset serving
+
+The HTML-fatal test exists because `html_errors=On` is the **default** whenever
+`display_errors` is on. A scanner matching only the plain-text form would miss
+most real targets.
+
+---
+
+## Limitations
+
+- **`NO SIGNAL` is not proof of safety.** A WAF, proxy body limit, or hardened
+  configuration can suppress the crash signal. Verify the installed version
+  directly where you can.
+- **A crash signal proves the OOM path is reachable**, which is the
+  precondition for exploitation. It does not prove a working exploit exists for
+  that specific build — heap layout and offsets vary.
+- **Distro backports** can carry the fix under an unpatched-looking version
+  number. `LIKELY VULNERABLE` from version data should be confirmed against the
+  vendor changelog.
+- **Long-running workers** may still run old code after a package update.
+  Compare worker start time against package install time.
+- **`memory_limit = -1`** targets may not OOM at all, producing `NO SIGNAL`
+  even when vulnerable.
+
+---
+
+## References
+
+- PHP advisory — https://www.php.net/archive/2026.php
+- GHSA-w8hw-w9fx-j79w (CVE-2026-109618) — https://github.com/php/php-src/security/advisories/GHSA-w8hw-w9fx-j79w
+- GHSA-6wmf-4rv5-p3rp (CVE-2026-109619) — https://github.com/php/php-src/security/advisories/GHSA-6wmf-4rv5-p3rp
+- Calif technical writeup — https://calif.io/php2shell/
+- Wiz Research — https://www.wiz.io/blog/php2shell-php-rce
+- Assetnote/Searchlight high-fidelity detection — https://www.slcyber.io/research/high-fidelity-detection-mechanism-for-php2shell-cve-2026-109618-and-cve-2026-109619
+
+---
+
+## Licence
+
+MIT. For authorised security testing only.
