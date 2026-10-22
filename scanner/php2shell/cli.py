@@ -289,3 +289,100 @@ def parse_headers(raw: Optional[list[str]]) -> dict[str, str]:
     return headers
 
 
+def main(argv: Optional[list[str]] = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    if args.no_color or not sys.stdout.isatty():
+        C.disable()
+
+    targets = load_targets(args)
+
+    # UI mode is interactive: the page can submit targets itself, so an empty
+    # target list is fine here.
+    if args.ui:
+        if args.quiet:
+            parser.error("--ui cannot be combined with --quiet")
+        return run_ui_mode(args, targets)
+
+    if not targets:
+        parser.error("no targets given; use -u URL or -l FILE")
+
+    if not args.quiet:
+        banner()
+
+    # Confirmation gate. Scanning is intrusive by design.
+    if not args.yes and sys.stdin.isatty() and not args.quiet:
+        print(colorize(
+            f"  About to scan {len(targets)} target(s) with up to "
+            f"{args.max_probe_mib} MiB probes each.", C.BOLD))
+        try:
+            answer = input("  Continue? [y/N] ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return 130
+        if answer not in ("y", "yes"):
+            print("  aborted.")
+            return 1
+
+    scanner = Scanner(
+        timeout=args.timeout,
+        connect_timeout=args.connect_timeout,
+        verify_ssl=not args.insecure,
+        sapi=args.sapi,
+        headers=parse_headers(args.header),
+        max_probe_mib=args.max_probe_mib,
+        on_progress=(lambda msg: print(colorize(f"  · {msg}", C.GREY))
+                     if args.verbose and not args.quiet else None),
+    )
+
+    results: list[ScanResult] = []
+    started = time.monotonic()
+
+    if args.threads > 1 and len(targets) > 1:
+        with ThreadPoolExecutor(max_workers=args.threads) as pool:
+            futures = {pool.submit(scanner.scan, t): t for t in targets}
+            for future in as_completed(futures):
+                target = futures[future]
+                try:
+                    result = future.result()
+                except Exception as exc:  # noqa: BLE001 - never kill the run
+                    result = ScanResult(target=target, error=str(exc),
+                                        reason=f"unhandled error: {exc}")
+                results.append(result)
+                if not args.quiet:
+                    print_result(result, args.verbose)
+    else:
+        for target in targets:
+            result = scanner.scan(target)
+            results.append(result)
+            if not args.quiet:
+                print_result(result, args.verbose)
+
+    elapsed = time.monotonic() - started
+
+    if not args.quiet:
+        print_summary(results)
+        print(colorize(f"  completed in {elapsed:.1f}s", C.GREY))
+
+    if args.output:
+        payload = [r.to_dict() for r in results
+                   if args.all_results or r.is_vulnerable]
+        try:
+            with open(args.output, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle, indent=2)
+            if not args.quiet:
+                print(colorize(f"  wrote {len(payload)} result(s) to {args.output}",
+                               C.GREY))
+        except OSError as exc:
+            print(colorize(f"error: cannot write {args.output}: {exc}", C.RED),
+                  file=sys.stderr)
+            return 2
+
+    if args.quiet:
+        for result in results:
+            if result.is_vulnerable:
+                print(f"{result.target}\t{result.verdict.value}\t"
+                      f"{result.confidence.value}")
+
+    return 1 if any(r.is_vulnerable for r in results) else 0
