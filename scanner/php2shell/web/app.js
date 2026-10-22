@@ -422,3 +422,144 @@
     vCaveat.hidden = caveats.length === 0;
 
     verdictPanel.hidden = false;
+    app.dataset.panel = 'open';
+    verdictPanel.style.animation = 'none';
+    void verdictPanel.offsetWidth;
+    verdictPanel.style.animation = '';
+    setConn(meta.tone === 'vulnerable' ? 'vulnerable' : meta.tone === 'error' ? 'error' : 'done',
+            meta.label.toLowerCase());
+  }
+
+  function hideVerdict() {
+    verdictPanel.hidden = true;
+    app.dataset.panel = 'closed';
+    setConn('idle', 'idle');
+  }
+
+  /* ── scan progress rendering ───────────────────────────────────────── */
+
+  const probeRows = new Map();
+
+  function resetStage(target) {
+    card.dataset.state = 'scanning';
+    cardUrl.textContent = target;
+    cardMeta.textContent = 'establishing baseline\u2026';
+    cardStatus.textContent = 'scanning';
+    cardProbes.innerHTML = '';
+    probeRows.clear();
+    fragments.innerHTML = '';
+    clearStamp();
+    hideVerdict();
+    app.dataset.verdict = 'none';
+    say(null);
+    setPhase('scan');
+  }
+
+  function probeRow(index) {
+    let row = probeRows.get(index);
+    if (row) return row;
+    row = document.createElement('div');
+    row.className = 'probe-row';
+    row.dataset.state = 'running';
+    row.innerHTML = `<span class="bar"><i></i></span><span class="txt"></span>`;
+    cardProbes.appendChild(row);
+    probeRows.set(index, row);
+    return row;
+  }
+
+  function handleProgress(ev) {
+    switch (ev.type) {
+      case 'start':
+        logLine(`target <b>${esc(ev.target)}</b>`);
+        break;
+
+      case 'control_start':
+        logLine('control request \u2192 baseline');
+        cardMeta.textContent = 'control request\u2026';
+        break;
+
+      case 'control': {
+        const ok = ev.error === null || ev.error === undefined;
+        const line = ok
+          ? `control HTTP ${ev.status ?? '---'} \u00b7 ${fmtBytes(ev.body_bytes)}`
+          : `control failed: ${esc(ev.error)}`;
+        logLine(line, ok ? '' : 'hit');
+        cardMeta.textContent = line;
+        break;
+      }
+
+      case 'probe_start': {
+        const row = probeRow(ev.index);
+        row.dataset.state = 'running';
+        row.querySelector('.txt').textContent =
+          `probe ${ev.index}/${ev.total} \u00b7 ${ev.size_mib} MiB`;
+        cardMeta.textContent = `probing ${ev.size_mib} MiB (${ev.parts} parts)\u2026`;
+        break;
+      }
+
+      case 'probe': {
+        const row = probeRow(ev.index);
+        const hit = Boolean(ev.signal);
+        const blocked = ev.detail && /reject/i.test(ev.detail);
+        row.dataset.state = hit ? 'hit' : blocked ? 'blocked' : 'done';
+        const status = ev.status == null ? 'no response' : `HTTP ${ev.status}`;
+        row.querySelector('.txt').textContent =
+          `probe ${ev.index} \u00b7 ${ev.size_mib} MiB \u00b7 ${status}`;
+        if (hit) {
+          logLine(`probe ${ev.index}: <b>crash signal</b> \u2014 ${esc(ev.signal)}`, 'hit');
+          cardMeta.textContent = `signal: ${ev.signal}`;
+        } else if (blocked) {
+          logLine(`probe ${ev.index}: blocked before PHP parsed it`, 'hit');
+          cardMeta.textContent = 'rejected before PHP parsed the body';
+        } else {
+          logLine(`probe ${ev.index}: ${status}, no signal`);
+          cardMeta.textContent = `${status} \u00b7 no signal`;
+        }
+        break;
+      }
+
+      case 'fatal':
+        logLine(`fatal: ${esc(ev.error)}`, 'hit');
+        setConn('error', 'error');
+        break;
+
+      default:
+        break;
+    }
+  }
+
+  /* ── job runner ────────────────────────────────────────────────────── */
+
+  async function runScan(target) {
+    resetStage(target);
+    setConn('scanning', 'scanning');
+    logLine('\u2014'.repeat(3) + ' new scan');
+
+    let res;
+    try {
+      res = await fetch(`/api/scan?token=${encodeURIComponent(TOKEN)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target }),
+      });
+    } catch (err) {
+      logLine(`cannot reach the UI server: ${esc(err.message)}`, 'hit');
+      setConn('error', 'offline');
+      card.dataset.state = 'safe';
+      return null;
+    }
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      logLine(`rejected: ${esc(body.error || res.status)}`, 'hit');
+      setConn('error', 'error');
+      return null;
+    }
+
+    const job = await res.json();
+
+    return new Promise((resolve) => {
+      const es = new EventSource(
+        `/api/events?id=${encodeURIComponent(job.id)}&token=${encodeURIComponent(TOKEN)}`,
+      );
+      let result = null;
