@@ -23,3 +23,28 @@ jobs:
       matrix:
         python: ["3.9", "3.10", "3.11", "3.12", "3.13"]
 
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Byte-compile both packages
+        run: |
+          python -m compileall -q scanner/php2shell exploit-kit/php2shell_exploit
+
+      - name: Run the scanner test suite
+        run: |
+          cd scanner
+          python -m unittest discover -s tests -v
+
+      - name: Exploit kit imports cleanly
+        run: |
+          cd exploit-kit
+          python -c "import php2shell_exploit as m; print('php2shell_exploit', m.__version__)"
+
+      - name: Launchers are executable and respond to --version
+        run: |
+          ./scanner/scan --version
+          ./exploit-kit/exploit --version
