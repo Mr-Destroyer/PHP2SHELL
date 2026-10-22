@@ -371,3 +371,127 @@ class Scanner:
                 self._log(f"probe {index}: VULNERABLE -- {detail}")
                 self._emit(
                     "probe",
+                    index=index,
+                    size_mib=size_mib,
+                    status=response.status,
+                    body_bytes=len(response.body),
+                    error=None,
+                    signal=signal.value,
+                    detail=detail,
+                    bytes_total=result.bytes_sent,
+                )
+                self._emit("result", result=result.to_dict())
+                return result
+
+            # ---- version says patched? stop early ----
+            if version is not None and version.status is PatchStatus.FIXED:
+                result.verdict = Verdict.FIXED
+                result.confidence = Confidence.MEDIUM
+                result.reason = (
+                    f"no crash observed and the target advertises a patched "
+                    f"release: {version.describe()}"
+                )
+                result.elapsed = time.monotonic() - started
+                self._log(f"probe {index}: FIXED -- {version.describe()}")
+                self._emit(
+                    "probe",
+                    index=index,
+                    size_mib=size_mib,
+                    status=response.status,
+                    body_bytes=len(response.body),
+                    error=None,
+                    signal=None,
+                    detail=probe_result.detail,
+                    bytes_total=result.bytes_sent,
+                )
+                self._emit("result", result=result.to_dict())
+                return result
+
+            self._log(f"probe {index}: no signal")
+            self._emit(
+                "probe",
+                index=index,
+                size_mib=size_mib,
+                status=response.status,
+                body_bytes=len(response.body),
+                error=None,
+                signal=None,
+                detail=probe_result.detail,
+                bytes_total=result.bytes_sent,
+            )
+
+        # ---- 3. Fall back to version data ------------------------------
+        if version is not None:
+            if version.status is PatchStatus.FIXED:
+                result.verdict = Verdict.FIXED
+                result.confidence = Confidence.MEDIUM
+                result.reason = (
+                    f"no crash observed and the target advertises a patched "
+                    f"release: {version.describe()}"
+                )
+            elif version.is_vulnerable:
+                result.verdict = Verdict.LIKELY_VULNERABLE
+                result.confidence = Confidence.MEDIUM
+                result.reason = (
+                    f"no crash observed, but the target advertises an "
+                    f"unpatched release: {version.describe()}. Version data "
+                    f"alone is not proof -- distro backports can carry the fix "
+                    f"under the original version number."
+                )
+            else:
+                result.verdict = Verdict.NOT_VULNERABLE
+                result.confidence = Confidence.LOW
+                result.reason = (
+                    f"no crash observed; version data inconclusive: "
+                    f"{version.describe()}"
+                )
+        elif rejected_reason:
+            result.verdict = Verdict.INCONCLUSIVE
+            result.confidence = Confidence.NONE
+            result.reason = rejected_reason
+        else:
+            result.verdict = Verdict.NOT_VULNERABLE
+            result.confidence = Confidence.NONE
+            result.reason = (
+                "no crash signal observed and the target does not advertise a "
+                "PHP version. This is NOT proof of safety: a WAF, a proxy "
+                "limit, or a hardened configuration can suppress the signal."
+            )
+
+        # ---- honesty check: could our probes even reach memory_limit? ----
+        # If post_max_size caps the body below what is needed to exhaust
+        # memory_limit, then no probe we are allowed to send can ever fire.
+        # Reporting that as "no signal" would be a false negative dressed up
+        # as a clean result, so say plainly that the test was inconclusive.
+        if result.verdict is Verdict.NOT_VULNERABLE and result.post_max_size:
+            ceiling_mib = (result.post_max_size - 1) / (1 << 20)
+            reachable = int(ceiling_mib * MEMORY_AMPLIFICATION)
+            if reachable < 1024:
+                result.verdict = Verdict.INCONCLUSIVE
+                result.confidence = Confidence.NONE
+                result.reason = (
+                    f"post_max_size is {result.post_max_size:,} bytes, so the "
+                    f"largest body PHP will parse is ~{ceiling_mib:.1f} MiB. At "
+                    f"the measured ~{MEMORY_AMPLIFICATION}x amplification that "
+                    f"forces at most ~{reachable} MB of memory, which may be "
+                    f"below this host's memory_limit. The probes cannot "
+                    f"reliably reach the exhaustion condition, so absence of a "
+                    f"signal proves nothing here. Verify the PHP version "
+                    f"directly."
+                )
+
+        result.elapsed = time.monotonic() - started
+        self._emit("result", result=result.to_dict())
+        return result
+
+    @staticmethod
+    def _infer_sapi(signal: Signal) -> str:
+        if signal is Signal.UPSTREAM_DEAD:
+            return "php-fpm"
+        if signal is Signal.EMPTY_200:
+            return "php-fpm"
+        if signal is Signal.IN_BAND_FATAL:
+            return "mod_php or php-fpm"
+        if signal is Signal.EMPTY_500:
+            return "mod_php or php-fpm"
+        return "unknown"
