@@ -96,3 +96,101 @@ class MockServer:
         self.httpd.powered_by = powered_by
         self.port = self.httpd.server_address[1]
         self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
+
+    def __enter__(self):
+        self.thread.start()
+        return f"http://127.0.0.1:{self.port}/index.php"
+
+    def __exit__(self, *exc):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+
+def scan(mode, powered_by=None, **kwargs):
+    with MockServer(mode, powered_by) as url:
+        scanner = Scanner(timeout=15, verify_ssl=False, **kwargs)
+        return scanner.scan(url)
+
+
+class TestVerdicts(unittest.TestCase):
+    def test_vulnerable_detected(self):
+        result = scan("vulnerable", powered_by="PHP/8.4.26")
+        self.assertIs(result.verdict, Verdict.VULNERABLE)
+        self.assertIs(result.confidence, Confidence.HIGH)
+        self.assertIs(result.signal, Signal.IN_BAND_FATAL)
+
+    def test_vulnerable_without_version_header(self):
+        # Detection must not depend on expose_php.
+        result = scan("vulnerable", powered_by=None)
+        self.assertIs(result.verdict, Verdict.VULNERABLE)
+        self.assertIs(result.confidence, Confidence.HIGH)
+
+    def test_patched_with_version(self):
+        result = scan("patched", powered_by="PHP/8.4.27")
+        self.assertIs(result.verdict, Verdict.FIXED)
+        self.assertFalse(result.is_vulnerable)
+
+    def test_patched_oom_is_not_vulnerable(self):
+        # The key false-positive case: patched PHP that still OOMs.
+        result = scan("patched_oom", powered_by="PHP/8.4.27")
+        self.assertFalse(result.is_vulnerable)
+        self.assertIs(result.verdict, Verdict.FIXED)
+
+    def test_patched_oom_without_version_is_not_vulnerable(self):
+        # No version header, app-level OOM -> must not claim vulnerable.
+        result = scan("patched_oom", powered_by=None)
+        self.assertFalse(result.is_vulnerable)
+
+    def test_empty_500_detected(self):
+        result = scan("empty500", powered_by=None)
+        self.assertIs(result.verdict, Verdict.VULNERABLE)
+        self.assertIs(result.signal, Signal.EMPTY_500)
+
+    def test_waf_block_is_inconclusive(self):
+        result = scan("waf", powered_by=None)
+        self.assertIs(result.verdict, Verdict.INCONCLUSIVE)
+        self.assertFalse(result.is_vulnerable)
+
+    def test_broken_target_is_inconclusive(self):
+        # Control returns 500 -> cannot baseline -> inconclusive.
+        result = scan("broken", powered_by=None)
+        self.assertIs(result.verdict, Verdict.INCONCLUSIVE)
+
+    def test_no_signal_no_version(self):
+        result = scan("patched", powered_by=None)
+        self.assertIs(result.verdict, Verdict.NOT_VULNERABLE)
+        self.assertIs(result.confidence, Confidence.NONE)
+
+    def test_version_fallback_likely(self):
+        # No crash, but version says unpatched -> LIKELY, MEDIUM.
+        result = scan("patched", powered_by="PHP/8.4.26")
+        self.assertIs(result.verdict, Verdict.LIKELY_VULNERABLE)
+        self.assertIs(result.confidence, Confidence.MEDIUM)
+
+
+class TestEscalation(unittest.TestCase):
+    def test_stops_after_first_signal(self):
+        result = scan("vulnerable", powered_by="PHP/8.4.26")
+        # Should stop at probe 1, not send all three.
+        self.assertEqual(len(result.probes), 1)
+
+    def test_max_probe_mib_caps_ladder(self):
+        result = scan("patched", powered_by=None, max_probe_mib=1)
+        self.assertTrue(all(p.size_mib <= 1 for p in result.probes))
+
+
+class TestErrorHandling(unittest.TestCase):
+    def test_unreachable_target(self):
+        scanner = Scanner(timeout=2, connect_timeout=2, verify_ssl=False)
+        result = scanner.scan("http://127.0.0.1:1/index.php")
+        self.assertIs(result.verdict, Verdict.INCONCLUSIVE)
+        self.assertIsNotNone(result.error)
+
+    def test_invalid_url(self):
+        scanner = Scanner(timeout=2, verify_ssl=False)
+        result = scanner.scan("ftp://example.com")
+        self.assertIs(result.verdict, Verdict.ERROR)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
