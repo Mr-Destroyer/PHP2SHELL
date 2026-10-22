@@ -71,3 +71,76 @@ that already answered is never sent 20 MiB.
 
 `Unknown on line 0` is the discriminator. An OOM that names a real file and line
 is an ordinary application error and is explicitly **not** reported.
+
+### 4. Verdicts
+
+| Verdict | Meaning |
+|---|---|
+| `VULNERABLE` | Behavioural proof — a crash signal fired |
+| `LIKELY VULNERABLE` | Version says unpatched, no crash observed |
+| `FIXED` | Version says patched, no crash observed |
+| `NO SIGNAL` | Nothing observed. **Not** proof of safety |
+| `INCONCLUSIVE` | Target blocked or broke the scan |
+| `ERROR` | Scan could not complete |
+
+---
+
+## The false positive this scanner avoids
+
+A **patched** PHP can still exhaust memory on a large multipart body and return
+an empty 500. The patch does not prevent OOM — it prevents OOM from leaving
+exploitable state behind.
+
+A naive scanner sees "empty 500 after big request" and reports vulnerable. That
+is wrong on every patched host with a low `memory_limit`.
+
+This scanner handles it by:
+
+1. Treating the **in-band `Unknown on line 0` fatal** as the primary signal —
+   that location only appears when PHP fails during request initialization.
+2. Requiring the **control request to have produced output** before any
+   differential signal counts.
+3. Escalating probe size, so a patched host that OOMs at 1 MiB is not
+   re-tested at 20 MiB.
+4. Falling back to version data with **explicitly reduced confidence**, never
+   silently upgrading it to `VULNERABLE`.
+
+The test suite covers this case directly (`test_patched_oom_is_not_vulnerable`).
+
+---
+
+## Install
+
+No dependencies. Either run in place:
+
+```bash
+./scan -u https://example.com
+```
+
+Or install the entry point:
+
+```bash
+pip install -e .
+php2shell-scan -u https://example.com
+```
+
+---
+
+## The browser UI
+
+```bash
+./scan --ui -u https://example.com
+```
+
+A local page opens on `127.0.0.1`. The scanner streams its real progress into a
+target card, and when the verdict lands, a one-punch hero settles the argument:
+
+| Verdict | What happens |
+|---|---|
+| `VULNERABLE` / `LIKELY` | The card shatters into fragments. |
+| `FIXED` / `NO SIGNAL` | The fist stops short. *"Not punchable."* |
+| `INCONCLUSIVE` / `ERROR` | He never reaches the target. |
+
+The animation is driven by scanner events, not a timer, so the punch only
+happens once a real result exists. Every pose change corresponds to something
+the scanner actually observed: the card sweeps while probes are in flight, and
