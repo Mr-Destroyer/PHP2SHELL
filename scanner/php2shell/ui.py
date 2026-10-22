@@ -245,3 +245,126 @@ class UiHandler(BaseHTTPRequestHandler):
 
     def _start_scan(self) -> None:
         try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = 0
+        if length <= 0 or length > MAX_BODY:
+            self._json(400, {"error": "bad body"})
+            return
+        try:
+            payload = json.loads(self.rfile.read(length))
+            target = str(payload.get("target", "")).strip()
+        except (ValueError, AttributeError):
+            self._json(400, {"error": "bad json"})
+            return
+        if not target:
+            self._json(400, {"error": "empty target"})
+            return
+        if len(target) > 2048:
+            self._json(400, {"error": "target too long"})
+            return
+
+        job = self.app.start_job(target)
+        self._json(200, {"id": job.id, "target": target})
+
+    def _stream(self, job: Job) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "close")
+        self.send_header("X-Accel-Buffering", "no")
+        self.end_headers()
+        self.close_connection = True
+
+        # Honour EventSource's automatic reconnect: it resends the last event
+        # id it saw, so a dropped connection resumes instead of replaying the
+        # whole job (which would re-run the punch animation).
+        cursor = 0
+        last_id = self.headers.get("Last-Event-ID", "")
+        if last_id.isdigit():
+            cursor = int(last_id) + 1
+
+        try:
+            self.wfile.write(b"retry: 500\n\n")
+            self.wfile.flush()
+            for event in job.follow(cursor):
+                if event is None:
+                    self.wfile.write(b": keep-alive\n\n")
+                else:
+                    line = json.dumps(event, separators=(",", ":"))
+                    self.wfile.write(f"id: {cursor}\ndata: {line}\n\n".encode())
+                    cursor += 1
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            # The browser navigated away mid-scan. The scan keeps running.
+            return
+
+
+_DENIED = b"""<!doctype html><meta charset=utf-8>
+<title>php2shell ui</title>
+<style>body{background:#0b0b0f;color:#eee;font:16px/1.6 system-ui;padding:12vh 8vw}
+code{background:#1c1c24;padding:.2em .5em;border-radius:4px}</style>
+<h1>Token required</h1>
+<p>Open the exact URL printed in your terminal, including the <code>?token=</code>
+parameter. It is generated fresh for every run.</p>"""
+
+
+class UiServer(ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+    def __init__(self, address, app: UiApp) -> None:
+        self.app = app
+        super().__init__(address, UiHandler)
+
+
+def run_ui(
+    *,
+    targets: list[str],
+    timeout: float = 60.0,
+    connect_timeout: float = 10.0,
+    verify_ssl: bool = True,
+    sapi: str = "auto",
+    headers: Optional[dict[str, str]] = None,
+    max_probe_mib: int = 20,
+    port: int = 0,
+    open_browser: bool = True,
+) -> int:
+    """Serve the UI until interrupted. Returns a process exit code."""
+    options = {
+        "timeout": timeout,
+        "connect_timeout": connect_timeout,
+        "verify_ssl": verify_ssl,
+        "sapi": sapi,
+        "headers": headers or {},
+        "max_probe_mib": max_probe_mib,
+    }
+    app = UiApp(options, targets)
+    try:
+        httpd = UiServer(("127.0.0.1", port), app)
+    except OSError as exc:
+        print(f"  error: cannot bind 127.0.0.1:{port}: {exc}", file=sys.stderr)
+        return 2
+    app.httpd = httpd
+    actual_port = httpd.server_address[1]
+    url = f"http://127.0.0.1:{actual_port}/?token={app.token}"
+
+    print(flush=True)
+    print("  ┌─ php2shell ui ─────────────────────────────────────────────┐", flush=True)
+    print(f"  │  {url}", flush=True)
+    print("  └────────────────────────────────────────────────────────────┘", flush=True)
+    print("  Local only. Ctrl-C to stop.", flush=True)
+    if targets:
+        print(f"  Ready to punch {len(targets)} target(s).", flush=True)
+    print(flush=True)
+
+    if open_browser:
+        threading.Timer(0.4, lambda: webbrowser.open(url)).start()
+
+    try:
+        httpd.serve_forever(poll_interval=0.25)
+    except KeyboardInterrupt:
+        print("\n  stopped.")
+    finally:
+        httpd.server_close()
+    return 0
