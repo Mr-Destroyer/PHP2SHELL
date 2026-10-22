@@ -124,3 +124,45 @@ Everything below was measured on `php:8.4.26-apache`, Apache 2.4.69 prefork,
 `mod_php`, `memory_limit=8M`, single worker. Full log in
 [`exploit-kit/FINDINGS.md`](exploit-kit/FINDINGS.md).
 
+| Check | Result |
+|---|---|
+| Scanner verdict on the lab | **VULNERABLE / HIGH** |
+| OOM reachable during request init | **YES** — `Allowed memory size ... in Unknown on line 0` |
+| Worker survives the OOM | **YES** — 3 consecutive OOMs, then normal service |
+| Stage 0 — worker rotation | **WORKS** — fresh child per attempt |
+| Stage 1 — heap base leak | **WORKS** — 4096-byte read, 98 pointers, stable chunk base |
+| Stage 2 — libphp base leak | **WORKS** — `pDestructor` → `zval_ptr_dtor` |
+| Stage 3 — forge and execute | **FAILS** — carrier never reaches `PS(http_session_vars)` |
+| Full RCE | **NOT REPRODUCED** |
+
+Offsets were derived from the image with `nm`, not copied from the public PoC
+(whose defaults belong to a different build):
+
+```
+zif_system    = 0x465370
+zval_ptr_dtor = 0x65EB60
+```
+
+---
+
+## Repository layout
+
+```
+PHP2SHELL/
+├── scanner/                  # behavioural detector (php2shell-scanner)
+│   ├── php2shell/            # cli, scanner, probe, transport, version, ui, web/
+│   ├── tests/                # 78 unit tests, stdlib unittest only
+│   └── scan                  # zero-install launcher
+├── exploit-kit/              # stage-by-stage chain (php2shell-exploit)
+│   ├── php2shell_exploit/    # exploit, leak, structures, diagnose, http, cli
+│   ├── FINDINGS.md           # lab evidence, including the failures
+│   └── exploit               # zero-install launcher
+├── docs/                     # methodology, CLI reference, chain notes, lab setup
+├── assets/banner.svg
+└── .github/workflows/ci.yml  # test suite on 3.9 → 3.13
+```
+
+---
+
+## Documentation
+
