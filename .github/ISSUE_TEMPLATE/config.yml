@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Vulnerability in PHP itself
+    url: https://www.php.net/security
+    about: This repository does not accept reports for php2shell in PHP core. Use PHP's security process.
+  - name: Security issue in these tools
+    url: https://github.com/Mr-Destroyer/PHP2SHELL/blob/main/SECURITY.md
+    about: Read the security policy before opening anything public.
