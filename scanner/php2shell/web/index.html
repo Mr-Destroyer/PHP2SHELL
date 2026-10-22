@@ -163,3 +163,85 @@
         <div class="card-meta" id="cardMeta">enter a URL below</div>
         <div class="card-probes" id="cardProbes"></div>
         <div class="card-stamp" id="cardStamp" aria-hidden="true"></div>
+      </div>
+      <div class="fragments" id="fragments" aria-hidden="true"></div>
+    </div>
+
+    <!-- ── impact fx ────────────────────────────────────────────────── -->
+    <div class="fx" id="fx" aria-hidden="true">
+      <div class="flash"></div>
+      <div class="ring r1"></div>
+      <div class="ring r2"></div>
+      <div class="ring r3"></div>
+      <svg class="impact-star" viewBox="0 0 200 200">
+        <path d="M100 0 L117 68 L180 28 L144 92 L200 100 L144 108 L180 172
+                 L117 132 L100 200 L83 132 L20 172 L56 108 L0 100 L56 92
+                 L20 28 L83 68 Z"/>
+      </svg>
+    </div>
+
+    <div class="dust" id="dust" aria-hidden="true"><i></i><i></i><i></i></div>
+
+    <div class="bubble" id="bubble" role="status">
+      <span id="bubbleText"></span>
+    </div>
+
+    <!-- ── console ──────────────────────────────────────────────────── -->
+    <section class="console">
+      <form class="scan-form" id="scanForm" autocomplete="off">
+        <span class="prompt" aria-hidden="true">$</span>
+        <input id="urlInput" name="target" type="text" spellcheck="false"
+               placeholder="https://example.com" aria-label="target URL">
+        <button id="scanBtn" type="submit">PUNCH</button>
+      </form>
+      <div class="log" id="log" aria-live="polite"></div>
+    </section>
+  </main>
+
+  <!-- ── verdict panel ──────────────────────────────────────────────── -->
+  <aside class="verdict" id="verdictPanel" hidden aria-live="polite">
+    <div class="verdict-head">
+      <span class="verdict-kicker">verdict</span>
+      <span class="verdict-label" id="vLabel">—</span>
+      <span class="verdict-conf" id="vConf">—</span>
+    </div>
+    <dl class="verdict-grid">
+      <div><dt>version</dt><dd id="vVersion">—</dd></div>
+      <div><dt>signal</dt><dd id="vSignal">—</dd></div>
+      <div><dt>elapsed</dt><dd id="vElapsed">—</dd></div>
+      <div><dt>sent</dt><dd id="vSent">—</dd></div>
+    </dl>
+    <p class="verdict-reason" id="vReason"></p>
+    <p class="verdict-caveat" id="vCaveat" hidden></p>
+    <div class="verdict-actions">
+      <button class="ghost-btn" id="againBtn" type="button">again</button>
+      <button class="ghost-btn" id="closeVerdict" type="button">close</button>
+    </div>
+  </aside>
+
+  <!-- ── help ───────────────────────────────────────────────────────── -->
+  <div class="help" id="help" hidden>
+    <div class="help-card">
+      <h2>how this works</h2>
+      <p>The hero only throws a punch when the scanner has a
+        <b>behavioural signal</b> — a crash observed on the target, not a
+        version string. Anything else and he pulls the punch.</p>
+      <ul>
+        <li><b>VULNERABLE</b> — card shatters. A crash signal fired.</li>
+        <li><b>LIKELY</b> — card shatters, but the evidence is version data only.</li>
+        <li><b>FIXED / NO SIGNAL</b> — "not punchable". Absence of a signal is
+          not proof of safety.</li>
+        <li><b>INCONCLUSIVE / ERROR</b> — he never reaches the target.</li>
+      </ul>
+      <p class="help-warn">Scanning triggers memory exhaustion and can crash a
+        PHP worker. Only scan systems you own or have permission to test.</p>
+      <button class="ghost-btn" id="closeHelp" type="button">got it</button>
+    </div>
+  </div>
+
+  <noscript><p class="noscript">The UI needs JavaScript. The CLI still works:
+    <code>./scan -u URL</code></p></noscript>
+</div>
+<script src="/app.js"></script>
+</body>
+</html>
