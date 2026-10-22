@@ -144,3 +144,77 @@ target card, and when the verdict lands, a one-punch hero settles the argument:
 The animation is driven by scanner events, not a timer, so the punch only
 happens once a real result exists. Every pose change corresponds to something
 the scanner actually observed: the card sweeps while probes are in flight, and
+the impact fires on the verdict event.
+
+Zero dependencies, no external assets. The page is plain HTML/CSS/JS with an
+inline SVG rig; the audio is synthesized with WebAudio.
+
+**It is local-only by design.** The server binds `127.0.0.1`, and each run
+generates a fresh token that is required on every API route. A random web page
+that guesses the port still cannot make the UI scan on your behalf. The server
+stays up for repeat scans until you press `Ctrl-C`.
+
+```bash
+# fixed port, don't open a browser
+./scan --ui --port 8765 --no-open
+
+# UI with no target: type URLs in the page
+./scan --ui
+```
+
+---
+
+## Usage
+
+```bash
+# single target
+./scan -u https://example.com
+
+# list of targets, 20 threads, JSON out
+./scan -l hosts.txt -t 20 -o results.json
+
+# only vulnerable hosts, machine-readable
+./scan -l hosts.txt -q
+
+# custom headers (auth, cookies)
+./scan -u https://example.com -H "Authorization: Bearer TOKEN"
+
+# restrict verdict rules to one SAPI
+./scan -u https://example.com --sapi fpm
+
+# cap probe size (less intrusive)
+./scan -u https://example.com --max-probe-mib 8
+
+# verbose: show every probe
+./scan -u https://example.com -v
+```
+
+### Options
+
+| Flag | Description | Default |
+|---|---|---|
+| `-u, --url` | Target URL (repeatable) | — |
+| `-l, --list` | File of targets, one per line | — |
+| `-t, --threads` | Concurrent scans | 5 |
+| `--timeout` | Per-request timeout (s) | 60 |
+| `--connect-timeout` | Connect timeout (s) | 10 |
+| `--max-probe-mib` | Largest probe | 20 |
+| `--sapi` | `auto` / `mod_php` / `fpm` | auto |
+| `-H, --header` | Extra header (repeatable) | — |
+| `-k, --insecure` | Skip TLS verification | off |
+| `-o, --output` | JSON output file | — |
+| `--all-results` | Include non-vulnerable in JSON | off |
+| `-v, --verbose` | Per-probe detail | off |
+| `-q, --quiet` | Only vulnerable targets | off |
+| `--yes` | Skip confirmation prompt | off |
+| `--ui` | Launch the browser UI (interactive, stays up until Ctrl-C) | off |
+| `--port` | UI port | free port |
+| `--no-open` | Do not open a browser automatically | off |
+
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | No vulnerable targets found |
+| 1 | At least one vulnerable target |
+| 2 | Usage or I/O error |
