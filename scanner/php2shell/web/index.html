@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>php2shell — one punch</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div id="app" data-phase="idle" data-verdict="none">
+
+  <div class="grain" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">拳</span>
+      <span class="brand-text">
+        <b>php2shell</b>
+        <i>CVE-2026-109618</i>
+      </span>
+    </div>
+    <div class="topbar-right">
+      <span class="conn" id="conn" data-state="idle"><i></i><span>idle</span></span>
+      <button class="ghost-btn" id="soundBtn" type="button" aria-pressed="true">sound on</button>
+      <a class="ghost-btn" href="#help" id="helpBtn">?</a>
+    </div>
+  </header>
+
+  <main class="stage" id="stage">
+    <div class="halftone" aria-hidden="true"></div>
+    <div class="glow" aria-hidden="true"></div>
+    <div class="speedlines" id="speedlines" aria-hidden="true"></div>
+
+    <div class="ground" aria-hidden="true"><span class="ground-line"></span></div>
+
+    <!-- ── hero ─────────────────────────────────────────────────────── -->
+    <div class="hero-wrap" id="heroWrap" aria-hidden="true">
+      <div class="afterimages" id="afterimages"></div>
+      <svg id="hero" viewBox="0 0 300 340" role="img">
+        <defs>
+          <linearGradient id="suit" x1="0" y1="0" x2="0.6" y2="1">
+            <stop offset="0" stop-color="#ffe873"/>
+            <stop offset=".55" stop-color="#ffd23f"/>
+            <stop offset="1" stop-color="#eda321"/>
+          </linearGradient>
+          <linearGradient id="cape" x1="0" y1="0" x2="0.2" y2="1">
+            <stop offset="0" stop-color="#fffdf4"/>
+            <stop offset=".7" stop-color="#e8e0c9"/>
+            <stop offset="1" stop-color="#c9bfa4"/>
+          </linearGradient>
+          <linearGradient id="cape2" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#e6ddc6"/>
+            <stop offset="1" stop-color="#b3a98e"/>
+          </linearGradient>
+          <linearGradient id="skin" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#ffe3c2"/>
+            <stop offset="1" stop-color="#efc09a"/>
+          </linearGradient>
+          <linearGradient id="glove" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#ff3b4e"/>
+            <stop offset="1" stop-color="#b50f21"/>
+          </linearGradient>
+        </defs>
+
+        <ellipse class="hero-shadow" cx="150" cy="330" rx="66" ry="9"/>
+
+        <g id="heroBob">
+        <g id="heroPose">
+
+          <!-- cape, behind everything -->
+          <g id="capeGrp">
+            <path class="cape-back" d="M190,100 C150,90 114,96 96,114
+              C76,134 63,170 58,212 C53,252 60,288 74,314
+              C78,321 89,318 87,310 C79,282 82,248 92,218
+              C98,198 104,172 108,150 C112,128 124,110 142,104
+              C158,98 176,99 190,100 Z"/>
+            <path class="cape-fold" d="M150,106 C132,124 118,162 112,204
+              C107,240 110,276 120,304"/>
+            <path class="cape-fold" d="M120,112 C104,136 92,176 88,216
+              C84,250 88,282 98,308"/>
+          </g>
+
