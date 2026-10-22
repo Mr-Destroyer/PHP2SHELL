@@ -221,3 +221,114 @@ class Transport:
                 except OSError:
                     pass
             result.elapsed = time.monotonic() - started
+
+        return result
+
+    def _send_body(self, sock: socket.socket, body: bytes) -> None:
+        view = memoryview(body)
+        for offset in range(0, len(body), SEND_CHUNK):
+            sock.sendall(view[offset:offset + SEND_CHUNK])
+
+    # -- response parsing ------------------------------------------------
+
+    def _parse(self, raw: bytearray, result: Response) -> None:
+        """Parse a raw HTTP/1.x response into `result`."""
+        if not raw:
+            result.error = "empty response (connection closed with no data)"
+            return
+
+        data = bytes(raw)
+        head, sep, body = data.partition(b"\r\n\r\n")
+        if not sep:
+            # Some servers use bare LF. Try that before giving up.
+            head, sep, body = data.partition(b"\n\n")
+        if not sep:
+            result.error = "malformed response (no header terminator)"
+            return
+
+        lines = head.replace(b"\r\n", b"\n").split(b"\n")
+        status_line = lines[0].decode("latin-1", errors="replace").strip()
+
+        parts = status_line.split(None, 2)
+        if len(parts) < 2 or not parts[0].upper().startswith("HTTP/"):
+            result.error = f"malformed status line: {status_line[:80]!r}"
+            return
+
+        try:
+            result.status = int(parts[1])
+        except ValueError:
+            result.error = f"malformed status code: {parts[1]!r}"
+            return
+
+        result.reason = parts[2] if len(parts) > 2 else ""
+
+        for line in lines[1:]:
+            if not line.strip():
+                continue
+            name, _, value = line.partition(b":")
+            key = name.decode("latin-1", errors="replace").strip().lower()
+            val = value.decode("latin-1", errors="replace").strip()
+            if key:
+                # First occurrence wins; duplicate headers are rare and we
+                # only care about X-Powered-By / Server / Content-Type.
+                result.headers.setdefault(key, val)
+
+        # Handle chunked transfer encoding so the body is usable.
+        if "chunked" in result.header("transfer-encoding").lower():
+            body = self._dechunk(body)
+
+        if len(body) > self.body_limit:
+            body = body[:self.body_limit]
+            result.truncated = True
+
+        result.body = body
+
+    @staticmethod
+    def _dechunk(data: bytes) -> bytes:
+        """Minimal chunked-transfer decoder. Tolerates truncation."""
+        out = bytearray()
+        pos = 0
+        while pos < len(data):
+            line_end = data.find(b"\r\n", pos)
+            if line_end == -1:
+                break
+            size_field = data[pos:line_end].split(b";")[0].strip()
+            try:
+                size = int(size_field, 16)
+            except ValueError:
+                break
+            if size == 0:
+                break
+            start = line_end + 2
+            end = start + size
+            if end > len(data):
+                out.extend(data[start:])
+                break
+            out.extend(data[start:end])
+            pos = end + 2
+        return bytes(out)
+
+
+def normalize_url(raw: str) -> str:
+    """
+    Normalize a user-supplied target into a full URL.
+
+    Accepts "example.com", "example.com/path", "https://example.com".
+    Defaults to https, because that is what a modern target will speak.
+    """
+    raw = raw.strip()
+    if not raw:
+        raise ValueError("empty URL")
+
+    if "://" not in raw:
+        raw = "https://" + raw
+
+    parts = urlsplit(raw)
+    if not parts.hostname:
+        raise ValueError(f"no host in {raw!r}")
+
+    scheme = parts.scheme.lower()
+    if scheme not in ("http", "https"):
+        raise ValueError(f"unsupported scheme {scheme!r}")
+
+    return raw
