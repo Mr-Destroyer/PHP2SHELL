@@ -1,0 +1,14 @@
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    commit-message:
+      prefix: "ci"
+    labels:
+      - "dependencies"
+    open-pull-requests-limit: 3
+
+  # Both packages are stdlib-only by policy, so there is no pip ecosystem entry
+  # here on purpose. If a runtime dependency is ever added, add one.
