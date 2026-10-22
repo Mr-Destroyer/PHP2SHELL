@@ -122,3 +122,127 @@ class Scanner:
         self.transport = Transport(
             timeout=timeout,
             connect_timeout=connect_timeout,
+            verify_ssl=verify_ssl,
+            user_agent=user_agent,
+        )
+        self.sapi = sapi
+        self.headers = headers or {}
+        self.max_probe_mib = max_probe_mib
+        self.on_progress = on_progress or (lambda _msg: None)
+        # Structured sibling of on_progress, for consumers that want to render
+        # state rather than print lines (the browser UI). Every event is a
+        # plain dict with a "type" key. See ui.py for the consumer.
+        self.on_event = on_event or (lambda _event: None)
+
+    # -- helpers ---------------------------------------------------------
+
+    def _log(self, message: str) -> None:
+        self.on_progress(message)
+
+    def _emit(self, event: str, **fields) -> None:
+        self.on_event({"type": event, **fields})
+
+    def _multipart_headers(self, boundary: str) -> dict[str, str]:
+        headers = dict(self.headers)
+        # Never let a caller-supplied Content-Length or Transfer-Encoding
+        # desync the body we are about to send.
+        for key in list(headers):
+            if key.lower() in ("content-length", "transfer-encoding"):
+                del headers[key]
+        headers["Content-Type"] = f"multipart/form-data; boundary={boundary}"
+        return headers
+
+    def _ladder(self) -> tuple[tuple[int, int], ...]:
+        """The probe ladder, capped by max_probe_mib."""
+        return tuple(p for p in PROBE_LADDER if p[0] <= self.max_probe_mib)
+
+    def _discover_post_max_size(
+        self, url: str, result: ScanResult
+    ) -> Optional[int]:
+        """
+        Learn the target's post_max_size by deliberately exceeding it.
+
+        PHP emits "POST Content-Length of N bytes exceeds the limit of M bytes"
+        during request startup when the body is too large, and that warning
+        names M. One oversized request therefore converts a hard limit into a
+        known quantity.
+
+        This matters because a probe above post_max_size is discarded before
+        the multipart parser runs: it cannot crash, cannot signal, and would
+        otherwise be reported as "no signal" on a host that is in fact
+        vulnerable. Discovering the limit is what stops the scanner from
+        silently testing nothing.
+
+        Returns None when the limit could not be determined (display_errors
+        off, a WAF swallowed the warning, or the body was accepted).
+        """
+        probe_size = DEFAULT_POST_MAX_SIZE + (1 << 20)
+        body = build_oversize_body(probe_size)
+        self._log(f"discovering post_max_size with a {probe_size:,}-byte body")
+
+        response = self.transport.request(
+            url,
+            method="POST",
+            body=body,
+            headers=self._multipart_headers(PROBE_BOUNDARY),
+        )
+        result.bytes_sent += len(body)
+
+        limit = parse_post_max_size(response.body or b"")
+        if limit is None:
+            self._log("post_max_size not disclosed; assuming the default")
+            return None
+        return limit
+
+    # -- main entry point ------------------------------------------------
+
+    def scan(self, target: str) -> ScanResult:
+        started = time.monotonic()
+        result = ScanResult(target=target)
+
+        try:
+            url = normalize_url(target)
+        except ValueError as exc:
+            result.error = str(exc)
+            result.reason = str(exc)
+            result.verdict = Verdict.ERROR
+            return result
+
+        result.tested_url = url
+        self._log(f"control request -> {url}")
+        self._emit("start", target=target, url=url)
+
+        # ---- 1. Control request ----------------------------------------
+        self._emit("control_start", url=url)
+        control = self.transport.request(
+            url,
+            method="POST",
+            body=build_control_body(),
+            headers=self._multipart_headers(CONTROL_BOUNDARY),
+        )
+        result.control = control
+        result.bytes_sent += len(build_control_body())
+
+        self._emit(
+            "control",
+            status=control.status,
+            body_bytes=len(control.body),
+            error=control.error,
+            elapsed=round(control.elapsed, 2),
+        )
+
+        if control.error:
+            result.verdict = Verdict.INCONCLUSIVE
+            result.error = f"control request failed: {control.error}"
+            result.reason = result.error
+            result.elapsed = time.monotonic() - started
+            self._emit("result", result=result.to_dict())
+            return result
+
+        if control.status is not None and control.status >= 500:
+            result.verdict = Verdict.INCONCLUSIVE
+            result.error = f"control request returned HTTP {control.status}"
+            result.reason = (
+                f"{result.error} -- cannot establish a baseline, so no "
+                f"differential signal is meaningful"
+            )
